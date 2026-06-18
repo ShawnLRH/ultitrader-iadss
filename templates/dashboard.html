@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IADSS UltiTrader — Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #080d1a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: linear-gradient(135deg, #111827 0%, #0d1526 100%);
+      border-bottom: 1px solid #1e2d45;
+      padding: 14px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header h1 { font-size: 1.25rem; font-weight: 700; color: #93c5fd; letter-spacing: 0.3px; }
+    .header h1 span { color: #6ee7b7; }
+    .badge {
+      padding: 3px 10px; border-radius: 20px;
+      font-size: 0.65rem; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 1.2px;
+    }
+    .badge-paper { background: #451a03; color: #fbbf24; border: 1px solid #78350f; }
+    .badge-live  { background: #052e16; color: #4ade80; border: 1px solid #14532d; }
+    .header-right { text-align: right; font-size: 0.72rem; color: #64748b; line-height: 1.6; }
+    #statusDot {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; background: #4ade80;
+      box-shadow: 0 0 6px #4ade80;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* ── Layout ── */
+    .container { padding: 20px 28px; max-width: 1700px; margin: 0 auto; }
+
+    /* ── KPI grid ── */
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+    .kpi-card {
+      background: #111827;
+      border: 1px solid #1e2d45;
+      border-radius: 14px;
+      padding: 18px 20px;
+      transition: border-color .2s, transform .15s;
+      cursor: default;
+    }
+    .kpi-card:hover { border-color: #334155; transform: translateY(-1px); }
+    .kpi-label { font-size: 0.68rem; color: #64748b; text-transform: uppercase; letter-spacing: .9px; margin-bottom: 8px; }
+    .kpi-value { font-size: 1.9rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .kpi-sub { font-size: 0.72rem; color: #64748b; margin-top: 5px; }
+    .green  { color: #4ade80; }
+    .red    { color: #f87171; }
+    .blue   { color: #60a5fa; }
+    .yellow { color: #fbbf24; }
+    .grey   { color: #94a3b8; }
+
+    /* ── Charts ── */
+    .charts-row   { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-bottom: 18px; }
+    .charts-row-2 { display: grid; grid-template-columns: 1fr 1fr;  gap: 14px; margin-bottom: 18px; }
+    .chart-card {
+      background: #111827;
+      border: 1px solid #1e2d45;
+      border-radius: 14px;
+      padding: 18px 20px;
+    }
+    .chart-title {
+      font-size: 0.7rem; color: #94a3b8;
+      text-transform: uppercase; letter-spacing: .9px;
+      margin-bottom: 14px; font-weight: 600;
+    }
+    .chart-wrap { position: relative; }
+
+    /* ── Tables ── */
+    .table-card {
+      background: #111827;
+      border: 1px solid #1e2d45;
+      border-radius: 14px;
+      padding: 18px 20px;
+      margin-bottom: 18px;
+      overflow-x: auto;
+    }
+    .table-title {
+      font-size: 0.7rem; color: #94a3b8;
+      text-transform: uppercase; letter-spacing: .9px;
+      margin-bottom: 14px; font-weight: 600;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left; font-size: 0.65rem; color: #64748b;
+      text-transform: uppercase; letter-spacing: .6px;
+      padding: 8px 12px; border-bottom: 1px solid #1e2d45;
+      white-space: nowrap;
+    }
+    td { font-size: 0.82rem; padding: 9px 12px; border-bottom: 1px solid #0d1526; white-space: nowrap; }
+    tbody tr:hover td { background: #162032; }
+    .win-row  td:first-child { border-left: 3px solid #4ade80; }
+    .loss-row td:first-child { border-left: 3px solid #f87171; }
+    .empty { color: #334155; text-align: center; padding: 44px; font-size: 0.85rem; }
+
+    /* ── Misc ── */
+    .lot-badge {
+      display: inline-block; padding: 2px 7px; border-radius: 6px;
+      font-size: 0.65rem; font-weight: 700; margin-left: 6px;
+      background: #052e16; color: #4ade80; border: 1px solid #14532d;
+    }
+    .limit-warn { color: #f87171; font-weight: 700; }
+
+    @media (max-width: 1100px) {
+      .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+      .charts-row, .charts-row-2 { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .kpi-grid { grid-template-columns: 1fr; }
+      .container { padding: 12px 14px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>IADSS <span>UltiTrader</span> Scalper</h1>
+    <span class="badge badge-paper" id="tradeBadge">PAPER</span>
+    <span id="statusDot"></span>
+  </div>
+  <div class="header-right">
+    Auto-refresh every 30s<br>
+    <span id="lastUpdated">—</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- KPI Row 1 -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Total P&amp;L</div>
+      <div class="kpi-value" id="totalPnl">—</div>
+      <div class="kpi-sub" id="totalPnlSub">all closed lots</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Win Rate</div>
+      <div class="kpi-value blue" id="winRate">—</div>
+      <div class="kpi-sub" id="winRateSub">0 W / 0 L</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Total Trades</div>
+      <div class="kpi-value grey" id="totalTrades">—</div>
+      <div class="kpi-sub">closed positions</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Avg P&amp;L / Trade</div>
+      <div class="kpi-value" id="avgPnl">—</div>
+      <div class="kpi-sub">per closed lot</div>
+    </div>
+  </div>
+
+  <!-- KPI Row 2 -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Best Trade</div>
+      <div class="kpi-value green" id="bestTrade">—</div>
+      <div class="kpi-sub">single lot</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Worst Trade</div>
+      <div class="kpi-value red" id="worstTrade">—</div>
+      <div class="kpi-sub">single lot</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Today's P&amp;L</div>
+      <div class="kpi-value" id="dailyPnl">—</div>
+      <div class="kpi-sub" id="dailyInfo">— losses today</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Open Positions</div>
+      <div class="kpi-value blue" id="openCount">—</div>
+      <div class="kpi-sub" id="openSymbols">—</div>
+    </div>
+  </div>
+
+  <!-- Chart Row 1: Equity Curve + Daily Bars -->
+  <div class="charts-row">
+    <div class="chart-card">
+      <div class="chart-title">Equity Curve — Cumulative P&amp;L ($)</div>
+      <div class="chart-wrap" style="height:270px"><canvas id="equityChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Daily P&amp;L ($)</div>
+      <div class="chart-wrap" style="height:270px"><canvas id="dailyChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Chart Row 2: Symbol P&L + Win/Loss by Symbol -->
+  <div class="charts-row-2">
+    <div class="chart-card">
+      <div class="chart-title">P&amp;L by Symbol ($)</div>
+      <div class="chart-wrap" style="height:270px"><canvas id="symbolPnlChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Wins vs Losses by Symbol</div>
+      <div class="chart-wrap" style="height:270px"><canvas id="winLossChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Open Positions -->
+  <div class="table-card">
+    <div class="table-title">Open Positions</div>
+    <div id="positionsWrap"><div class="empty">No open positions</div></div>
+  </div>
+
+  <!-- Trade History -->
+  <div class="table-card">
+    <div class="table-title">Trade History (last 100)</div>
+    <div id="tradesWrap"><div class="empty">No trades yet — waiting for signals from TradingView…</div></div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+  Chart.defaults.color = '#64748b';
+  Chart.defaults.borderColor = '#1e2d45';
+
+  const BASE = { responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } } };
+
+  function mkChart(id, type, datasets, extraOpts = {}) {
+    return new Chart(document.getElementById(id), {
+      type,
+      data: { labels: [], datasets },
+      options: { ...BASE, ...extraOpts },
+    });
+  }
+
+  const equityC = mkChart('equityChart', 'line', [{
+    label: 'Cumulative P&L', data: [],
+    borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,.07)',
+    fill: true, tension: 0.35, pointRadius: 2, borderWidth: 2,
+  }], { scales: { y: { ticks: { callback: v => '$' + v.toFixed(0) } }, x: { ticks: { maxTicksLimit: 10, maxRotation: 0 } } } });
+
+  const dailyC = mkChart('dailyChart', 'bar', [{
+    label: 'Daily P&L', data: [], backgroundColor: [], borderRadius: 5,
+  }], { scales: { y: { ticks: { callback: v => '$' + v.toFixed(0) } } } });
+
+  const symPnlC = mkChart('symbolPnlChart', 'bar', [{
+    label: 'P&L', data: [], backgroundColor: [], borderRadius: 5,
+  }], { indexAxis: 'y', scales: { x: { ticks: { callback: v => '$' + v.toFixed(0) } } } });
+
+  const winLossC = mkChart('winLossChart', 'bar', [
+    { label: 'Wins',   data: [], backgroundColor: '#14532d', borderRadius: 4 },
+    { label: 'Losses', data: [], backgroundColor: '#7f1d1d', borderRadius: 4 },
+  ], {
+    plugins: { ...BASE.plugins, legend: { display: true, labels: { color: '#94a3b8', boxWidth: 12 } } },
+    scales: { x: { stacked: true }, y: { stacked: true } },
+  });
+
+  /* ── helpers ── */
+  function fmtUsd(v)  { return (v >= 0 ? '+' : '') + '$' + Math.abs(v).toFixed(2); }
+  function fmtPct(v)  { return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
+  function clrUsd(v)  { return v >= 0 ? 'green' : 'red'; }
+
+  /* ── main fetch ── */
+  async function refresh() {
+    try {
+      const [sRes, tRes, pRes] = await Promise.all([
+        fetch('/api/stats'), fetch('/api/trades'), fetch('/status'),
+      ]);
+      const stats   = await sRes.json();
+      const { trades } = await tRes.json();
+      const status  = await pRes.json();
+
+      renderKPIs(stats, status);
+      renderCharts(trades);
+      renderPositions(status);
+      renderTrades(trades);
+
+      document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function renderKPIs(stats, status) {
+    const tp = stats.total_pnl ?? 0;
+    set('totalPnl',    fmtUsd(tp),                      clrUsd(tp));
+    set('totalPnlSub', stats.total_trades + ' closed lots');
+    set('winRate',     (stats.win_rate ?? 0) + '%',      'blue');
+    set('winRateSub',  stats.wins + ' W / ' + stats.losses + ' L');
+    set('totalTrades', stats.total_trades ?? 0,          'grey');
+    const avg = stats.avg_pnl ?? 0;
+    set('avgPnl', fmtUsd(avg), clrUsd(avg));
+    set('bestTrade',  fmtUsd(stats.best_trade  ?? 0), 'green');
+    set('worstTrade', fmtUsd(stats.worst_trade ?? 0), 'red');
+    const dp = status.daily_pnl ?? 0;
+    set('dailyPnl', fmtUsd(dp), clrUsd(dp));
+    const limWarn = status.limit_reached ? ' <span class="limit-warn">⛔ LIMIT</span>' : '';
+    document.getElementById('dailyInfo').innerHTML = status.daily_losses + ' losses today' + limWarn;
+    const syms = Object.keys(status.positions ?? {});
+    set('openCount',   syms.length, 'blue');
+    set('openSymbols', syms.length ? syms.join(', ') : 'None');
+  }
+
+  function set(id, val, cls) {
+    const el = document.getElementById(id);
+    el.textContent = val;
+    if (cls) { el.className = el.className.replace(/\bgreen\b|\bred\b|\bblue\b|\byellow\b|\bgrey\b/g, ''); el.classList.add(cls); }
+  }
+
+  function renderCharts(trades) {
+    if (!trades || !trades.length) return;
+
+    /* Equity curve */
+    let cum = 0;
+    const eqLabels = [], eqData = [];
+    trades.forEach(t => {
+      cum += parseFloat(t.pnl_usd ?? 0);
+      eqLabels.push((t.exit_time ?? '').substring(5, 16));
+      eqData.push(parseFloat(cum.toFixed(2)));
+    });
+    const finalPnl = eqData[eqData.length - 1] ?? 0;
+    equityC.data.labels = eqLabels;
+    equityC.data.datasets[0].data = eqData;
+    equityC.data.datasets[0].borderColor = finalPnl >= 0 ? '#4ade80' : '#f87171';
+    equityC.data.datasets[0].backgroundColor = finalPnl >= 0 ? 'rgba(74,222,128,.07)' : 'rgba(248,113,113,.07)';
+    equityC.update('none');
+
+    /* Daily bars */
+    const dayMap = {};
+    trades.forEach(t => {
+      const d = (t.exit_time ?? '').substring(0, 10); if (!d) return;
+      dayMap[d] = (dayMap[d] ?? 0) + parseFloat(t.pnl_usd ?? 0);
+    });
+    const days = Object.keys(dayMap).sort();
+    const dayVals = days.map(d => parseFloat(dayMap[d].toFixed(2)));
+    dailyC.data.labels = days.map(d => d.substring(5));
+    dailyC.data.datasets[0].data = dayVals;
+    dailyC.data.datasets[0].backgroundColor = dayVals.map(v => v >= 0 ? '#14532d' : '#7f1d1d');
+    dailyC.update('none');
+
+    /* Per-symbol P&L */
+    const symMap = {}, symW = {}, symT = {};
+    trades.forEach(t => {
+      const s = t.symbol, p = parseFloat(t.pnl_usd ?? 0);
+      symMap[s] = (symMap[s] ?? 0) + p;
+      symT[s]   = (symT[s] ?? 0) + 1;
+      if (p > 0) symW[s] = (symW[s] ?? 0) + 1;
+    });
+    const syms = Object.keys(symMap).sort((a, b) => symMap[b] - symMap[a]);
+    const symVals = syms.map(s => parseFloat(symMap[s].toFixed(2)));
+    symPnlC.data.labels = syms;
+    symPnlC.data.datasets[0].data = symVals;
+    symPnlC.data.datasets[0].backgroundColor = symVals.map(v => v >= 0 ? '#14532d' : '#7f1d1d');
+    symPnlC.update('none');
+
+    winLossC.data.labels = syms;
+    winLossC.data.datasets[0].data = syms.map(s => symW[s] ?? 0);
+    winLossC.data.datasets[1].data = syms.map(s => (symT[s] ?? 0) - (symW[s] ?? 0));
+    winLossC.update('none');
+  }
+
+  function renderPositions(status) {
+    const wrap = document.getElementById('positionsWrap');
+    const pos  = status.positions ?? {};
+    const syms = Object.keys(pos);
+    if (!syms.length) { wrap.innerHTML = '<div class="empty">No open positions</div>'; return; }
+
+    let html = '<table><thead><tr><th>Symbol</th><th>Lots</th><th>Avg Entry</th><th>Current</th><th>Unreal. P&amp;L</th><th>Stop Loss</th><th>Take Profit</th></tr></thead><tbody>';
+    syms.forEach(sym => {
+      const p     = pos[sym];
+      const entry = p.avg_entry  ?? 0;
+      const cur   = p.current_price ?? 0;
+      const lots  = p.lots ?? [];
+      const qty   = lots.reduce((a, l) => a + (l.qty ?? 0), 0);
+      const uPnl  = (cur - entry) * qty;
+      const uPct  = entry ? (cur - entry) / entry * 100 : 0;
+      const sl    = lots.length ? lots[0].sl : 0;
+      const tp    = lots.length ? lots[0].tp : 0;
+      const clr   = uPnl >= 0 ? 'green' : 'red';
+      html += `<tr>
+        <td><b>${sym}</b><span class="lot-badge">${lots.length} lot${lots.length !== 1 ? 's' : ''}</span></td>
+        <td>${lots.length}</td>
+        <td>$${entry.toFixed(4)}</td>
+        <td>$${cur.toFixed(4)}</td>
+        <td class="${clr}">${fmtUsd(uPnl)} (${fmtPct(uPct)})</td>
+        <td class="red">$${(+sl).toFixed(4)}</td>
+        <td class="green">$${(+tp).toFixed(4)}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  }
+
+  function renderTrades(trades) {
+    const wrap = document.getElementById('tradesWrap');
+    if (!trades || !trades.length) { wrap.innerHTML = '<div class="empty">No trades yet — waiting for signals from TradingView…</div>'; return; }
+
+    const recent = trades.slice(-100).reverse();
+    let html = '<table><thead><tr><th>Exit Time</th><th>Symbol</th><th>Lot</th><th>Entry $</th><th>Exit $</th><th>Qty</th><th>P&amp;L $</th><th>P&amp;L %</th><th>Duration</th><th>Reason</th></tr></thead><tbody>';
+    recent.forEach(t => {
+      const pnl    = parseFloat(t.pnl_usd ?? 0);
+      const pnlPct = parseFloat(t.pnl_pct ?? 0);
+      const clr    = pnl >= 0 ? 'green' : 'red';
+      const rowCls = pnl >= 0 ? 'win-row' : 'loss-row';
+      const dur    = calcDuration(t.entry_time, t.exit_time);
+      html += `<tr class="${rowCls}">
+        <td>${(t.exit_time ?? '').substring(5, 16)}</td>
+        <td><b>${t.symbol}</b></td>
+        <td style="color:#475569">${t.lot_id}</td>
+        <td>$${parseFloat(t.entry_price ?? 0).toFixed(4)}</td>
+        <td>$${parseFloat(t.exit_price  ?? 0).toFixed(4)}</td>
+        <td>${parseFloat(t.qty ?? 0).toFixed(4)}</td>
+        <td class="${clr}">${fmtUsd(pnl)}</td>
+        <td class="${clr}">${fmtPct(pnlPct)}</td>
+        <td style="color:#475569">${dur}</td>
+        <td style="color:#94a3b8;font-size:.72rem">${t.reason ?? ''}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  }
+
+  function calcDuration(entry, exit) {
+    if (!entry || !exit) return '—';
+    const ms = (new Date(exit.replace(' ', 'T') + 'Z') - new Date(entry.replace(' ', 'T') + 'Z'));
+    if (isNaN(ms) || ms < 0) return '—';
+    const s = Math.floor(ms / 1000);
+    if (s < 60)   return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+    return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+  }
+
+  refresh();
+  setInterval(refresh, 30000);
+</script>
+</body>
+</html>

@@ -17,6 +17,7 @@ from alerts import TelegramAlerter
 from position_manager import PositionManager
 from signal_engine import SignalEngine
 from risk_manager import RiskManager
+from trade_logger import TradeLogger
 from webhook_server import create_app
 
 logging.basicConfig(
@@ -52,8 +53,9 @@ def main():
         if chat_id:
             logger.info(f"Add to .env → TELEGRAM_CHAT_ID={chat_id}")
 
+    trade_logger = TradeLogger()
     position_mgr = PositionManager(cfg)
-    signal_engine = SignalEngine(cfg, position_mgr, broker, alerter)
+    signal_engine = SignalEngine(cfg, position_mgr, broker, alerter, trade_logger)
     risk_mgr = RiskManager(cfg, broker, position_mgr, signal_engine, alerter)
 
     # Start risk monitor in daemon thread
@@ -74,7 +76,7 @@ def main():
         logger.error(f"Startup Alpaca check failed: {e}")
 
     # Start webhook server (blocking)
-    app = create_app(cfg, signal_engine, alerter)
+    app = create_app(cfg, signal_engine, alerter, trade_logger)
     logger.info(f"Webhook server listening on 0.0.0.0:{cfg.WEBHOOK_PORT}")
     logger.info(f"Webhook URL: http://0.0.0.0:{cfg.WEBHOOK_PORT}/webhook")
     logger.info(f"Status page: http://0.0.0.0:{cfg.WEBHOOK_PORT}/status")

@@ -82,11 +82,12 @@ class _SymbolState:
 
 
 class SignalEngine:
-    def __init__(self, config, position_mgr, broker, alerter):
+    def __init__(self, config, position_mgr, broker, alerter, trade_logger=None):
         self.config = config
         self.position_mgr = position_mgr
         self.broker = broker
         self.alerter = alerter
+        self.trade_logger = trade_logger
         self._lock = Lock()
         self._states: dict[str, _SymbolState] = {
             sym: _SymbolState(config.SIGNAL_WINDOW_SEC) for sym in config.ALL_SYMBOLS
@@ -185,6 +186,16 @@ class SignalEngine:
             pnl_pct = (current_price - avg_entry) / avg_entry * 100
             self.position_mgr.record_trade_result(pnl)
 
+            if self.trade_logger:
+                for lot in lots:
+                    lot_pnl = (current_price - lot.entry_price) * lot.qty
+                    lot_pnl_pct = (current_price - lot.entry_price) / lot.entry_price * 100
+                    self.trade_logger.log_trade(
+                        symbol=symbol, lot_id=lot.lot_id, entry_time=lot.entry_time,
+                        entry_price=lot.entry_price, exit_price=current_price, qty=lot.qty,
+                        pnl_usd=lot_pnl, pnl_pct=lot_pnl_pct, reason=reason,
+                    )
+
             emoji = "✅" if pnl >= 0 else "🔴"
             msg = (
                 f"{emoji} <b>EXIT</b> {symbol}\n"
@@ -210,6 +221,12 @@ class SignalEngine:
             pnl = (current_price - lot.entry_price) * lot.qty
             pnl_pct = (current_price - lot.entry_price) / lot.entry_price * 100
             self.position_mgr.record_trade_result(pnl)
+            if self.trade_logger:
+                self.trade_logger.log_trade(
+                    symbol=symbol, lot_id=lot.lot_id, entry_time=lot.entry_time,
+                    entry_price=lot.entry_price, exit_price=current_price, qty=lot.qty,
+                    pnl_usd=pnl, pnl_pct=pnl_pct, reason=reason,
+                )
             remaining = self.position_mgr.lot_count(symbol)
             msg = (
                 f"💰 <b>TAKE-PROFIT</b> {symbol} [{lot.lot_id}]\n"
