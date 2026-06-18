@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.pdf
+*.xlsx
+*.docx
+*.xls
+*.log
+*.json
+ia-ptos-state.json
+ptos-state.json

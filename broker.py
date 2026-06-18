@@ -1,0 +1,127 @@
+"""Alpaca broker wrapper – handles both stocks and crypto."""
+import time
+import logging
+from typing import Optional
+
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
+from alpaca.data.requests import StockLatestQuoteRequest, CryptoLatestQuoteRequest
+
+logger = logging.getLogger(__name__)
+
+
+class AlpacaBroker:
+    def __init__(self, config):
+        self.config = config
+        self.trading = TradingClient(
+            api_key=config.ALPACA_API_KEY,
+            secret_key=config.ALPACA_SECRET_KEY,
+            paper=config.PAPER_TRADING,
+        )
+        self.stock_data = StockHistoricalDataClient(
+            api_key=config.ALPACA_API_KEY,
+            secret_key=config.ALPACA_SECRET_KEY,
+        )
+        self.crypto_data = CryptoHistoricalDataClient()
+
+    # ── Price queries ──────────────────────────────────────────────────────────
+
+    def get_price(self, symbol: str) -> Optional[float]:
+        """Return current mid-price (ask+bid)/2, or None on error."""
+        try:
+            if self.config.is_crypto(symbol):
+                req = CryptoLatestQuoteRequest(symbol_or_symbols=symbol)
+                q = self.crypto_data.get_crypto_latest_quote(req)[symbol]
+                return round((float(q.ask_price) + float(q.bid_price)) / 2, 6)
+            else:
+                req = StockLatestQuoteRequest(symbol_or_symbols=symbol)
+                q = self.stock_data.get_stock_latest_quote(req)[symbol]
+                return round((float(q.ask_price) + float(q.bid_price)) / 2, 4)
+        except Exception as e:
+            logger.warning(f"get_price {symbol}: {e}")
+            return None
+
+    # ── Order execution ────────────────────────────────────────────────────────
+
+    def buy(self, symbol: str, notional_usd: float) -> Optional[dict]:
+        """Market buy by notional USD. Waits for fill and returns fill data."""
+        try:
+            tif = TimeInForce.GTC if self.config.is_crypto(symbol) else TimeInForce.DAY
+            order = self.trading.submit_order(
+                MarketOrderRequest(
+                    symbol=symbol,
+                    notional=round(notional_usd, 2),
+                    side=OrderSide.BUY,
+                    time_in_force=tif,
+                )
+            )
+            # Brief wait for market-order fill
+            time.sleep(0.8)
+            filled = self.trading.get_order_by_id(str(order.id))
+            fill_price = float(filled.filled_avg_price or 0)
+            fill_qty = float(filled.filled_qty or 0)
+            logger.info(f"BUY {symbol} ${notional_usd:.2f} → qty={fill_qty:.6f} @ ${fill_price:.4f}")
+            return {
+                "order_id": str(order.id),
+                "symbol": symbol,
+                "fill_price": fill_price,
+                "fill_qty": fill_qty,
+                "notional": notional_usd,
+            }
+        except Exception as e:
+            logger.error(f"buy {symbol} ${notional_usd:.2f}: {e}")
+            return None
+
+    def sell_qty(self, symbol: str, qty: float) -> Optional[dict]:
+        """Market sell by quantity (for LIFO partial exits)."""
+        try:
+            tif = TimeInForce.GTC if self.config.is_crypto(symbol) else TimeInForce.DAY
+            order = self.trading.submit_order(
+                MarketOrderRequest(
+                    symbol=symbol,
+                    qty=round(qty, 6),
+                    side=OrderSide.SELL,
+                    time_in_force=tif,
+                )
+            )
+            time.sleep(0.8)
+            filled = self.trading.get_order_by_id(str(order.id))
+            fill_price = float(filled.filled_avg_price or 0)
+            logger.info(f"SELL {symbol} qty={qty:.6f} @ ${fill_price:.4f}")
+            return {"order_id": str(order.id), "fill_price": fill_price}
+        except Exception as e:
+            logger.error(f"sell_qty {symbol} {qty}: {e}")
+            return None
+
+    def close_position(self, symbol: str) -> bool:
+        """Close the entire Alpaca position for a symbol."""
+        try:
+            self.trading.close_position(symbol)
+            logger.info(f"CLOSE all {symbol}")
+            return True
+        except Exception as e:
+            logger.error(f"close_position {symbol}: {e}")
+            return False
+
+    # ── Account / market info ──────────────────────────────────────────────────
+
+    def get_account(self) -> dict:
+        try:
+            a = self.trading.get_account()
+            return {
+                "equity": float(a.equity),
+                "cash": float(a.cash),
+                "buying_power": float(a.buying_power),
+            }
+        except Exception as e:
+            logger.error(f"get_account: {e}")
+            return {}
+
+    def is_market_open(self) -> bool:
+        try:
+            return self.trading.get_clock().is_open
+        except Exception as e:
+            logger.warning(f"is_market_open: {e}")
+            return False
