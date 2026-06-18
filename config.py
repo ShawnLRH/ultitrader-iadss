@@ -28,7 +28,7 @@ class Config:
     ENTRY_COOLDOWN_SEC: int = int(os.getenv("ENTRY_COOLDOWN_SEC", "120"))
 
     # Webhook server
-    WEBHOOK_PORT: int = int(os.getenv("WEBHOOK_PORT", "3000"))
+    WEBHOOK_PORT: int = int(os.getenv("PORT") or os.getenv("WEBHOOK_PORT", "3000"))
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET", "iadss-ultitrader-2024")
 
     # Telegram
