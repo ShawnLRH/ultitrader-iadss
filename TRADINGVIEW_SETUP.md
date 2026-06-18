@@ -76,9 +76,9 @@ https://YOUR-RAILWAY-URL/webhook?secret=iadss-ultitrader-2024
 https://XXXX.ngrok.app/webhook?secret=iadss-ultitrader-2024
 ```
 
-**For Railway production:**
+**For Railway production (UltiTrader service):**
 ```
-https://brilliant-endurance-production-XXXX.up.railway.app/webhook?secret=iadss-ultitrader-2024
+https://ultitrader-iadss-production.up.railway.app/webhook?secret=iadss-ultitrader-2024
 ```
 
 ---
@@ -178,16 +178,21 @@ Copy the exact JSON below into the **"Message"** box for each alert.
 
 TradingView limits alerts by plan tier. Start with these priority symbols:
 
-### TradingView Pro (~20 alerts) — Start with 3 symbols
+### TradingView Pro (~20 alerts) — Start with 2 symbols
 
 | Priority | Symbols | Alerts needed |
 |----------|---------|---------------|
-| Tier 1 | NVDA, TSLA, BTC/USD | 3 × 6 = 18 alerts |
+| Tier 1 | NVDA, BTC/USD | 2 × 8 = 16 alerts |
 
 ### TradingView Pro+ (~100 alerts) — All target symbols
 
-Create 6 alerts per symbol × 12 symbols = **72 alerts**  
-Plus 12 macro OT alerts (15-min) = **84 alerts total**
+8 alerts per symbol × 12 symbols = **96 alerts total**
+
+The 8 alerts per symbol are:
+- conf buy, conf sell (5-min chart)
+- mr buy, mr sell (5-min chart)
+- trend buy, trend sell (5-min chart)
+- ot up, ot down (15-min chart)
 
 **Recommended symbol priority order:**
 1. NVDA (highest volatility, best for scalping)
