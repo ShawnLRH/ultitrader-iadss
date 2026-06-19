@@ -15,6 +15,7 @@ Exit fires when : Trend=SELL alone (fast flip exit) OR Confluence=SELL + MR=SELL
 """
 import time
 import logging
+from collections import deque
 from threading import Lock
 
 logger = logging.getLogger(__name__)
@@ -92,12 +93,26 @@ class SignalEngine:
         self._states: dict[str, _SymbolState] = {
             sym: _SymbolState(config.SIGNAL_WINDOW_SEC) for sym in config.ALL_SYMBOLS
         }
+        self._webhook_log: deque = deque(maxlen=200)
 
     def process_signal(self, symbol: str, model: str, signal: str, price: float, strength: str = "confirmed"):
         """Called by webhook server for every incoming TradingView alert."""
+        raw_symbol = symbol
         symbol = self.config.normalize_symbol(symbol)
+        ignored = symbol not in self._states
 
-        if symbol not in self._states:
+        self._webhook_log.append({
+            "ts":       time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+            "symbol":   symbol,
+            "raw":      raw_symbol if raw_symbol.upper() != symbol else "",
+            "model":    model,
+            "signal":   signal,
+            "price":    round(price, 4) if price else 0,
+            "strength": strength,
+            "ignored":  ignored,
+        })
+
+        if ignored:
             logger.warning(f"Ignored unknown symbol: {symbol}")
             return
 
@@ -209,6 +224,40 @@ class SignalEngine:
             self.alerter.send(msg)
         else:
             logger.error(f"{symbol}: close_position failed or price unavailable")
+
+    # ── Diagnostics ────────────────────────────────────────────────────────────
+
+    def get_webhook_log(self) -> list:
+        """Last 200 webhook hits, newest first."""
+        return list(reversed(self._webhook_log))
+
+    def get_signal_state(self) -> dict:
+        """Current per-symbol signal state for the dashboard diagnostics panel."""
+        now = time.time()
+
+        def fmt(d, window):
+            if not d:
+                return {"signal": None, "age_sec": None, "fresh": False, "strength": None}
+            age = now - d["ts"]
+            return {
+                "signal":   d["signal"],
+                "age_sec":  round(age),
+                "fresh":    age <= window,
+                "strength": d.get("strength"),
+            }
+
+        result = {}
+        with self._lock:
+            for sym, state in self._states.items():
+                result[sym] = {
+                    "conf":          fmt(state.conf,  state.window),
+                    "mr":            fmt(state.mr,    state.window),
+                    "trend":         fmt(state.trend, state.window),
+                    "macro_bias":    state.macro_bias,
+                    "has_confluence": state.has_buy_confluence(),
+                    "lot_count":     self.position_mgr.lot_count(sym),
+                }
+        return result
 
     def exit_one_lot(self, symbol: str, reason: str):
         """Called by risk manager for LIFO take-profit (newest lot only)."""

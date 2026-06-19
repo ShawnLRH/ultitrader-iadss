@@ -98,4 +98,14 @@ def create_app(config, signal_engine, alerter, trade_logger=None):
             return jsonify({"trades": []})
         return jsonify({"trades": trade_logger.get_all_trades()})
 
+    @app.route("/api/log", methods=["GET"])
+    def api_log():
+        """Recent incoming TradingView webhook hits (newest first, max 200)."""
+        return jsonify({"log": signal_engine.get_webhook_log()})
+
+    @app.route("/api/signals", methods=["GET"])
+    def api_signals():
+        """Current per-symbol signal state (freshness, confluence, macro bias)."""
+        return jsonify(signal_engine.get_signal_state())
+
     return app

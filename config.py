@@ -23,7 +23,8 @@ class Config:
     DAILY_DRAWDOWN_USD: float = float(os.getenv("DAILY_DRAWDOWN_USD", "300"))
 
     # IADSS confluence window – all 3 models must fire within this many seconds
-    SIGNAL_WINDOW_SEC: int = int(os.getenv("SIGNAL_WINDOW_SEC", "300"))
+    # 600s (10 min) = 2 bars on a 5-min chart; 300s was too tight and caused 0 trades
+    SIGNAL_WINDOW_SEC: int = int(os.getenv("SIGNAL_WINDOW_SEC", "600"))
     # Cooldown after entry before re-entering same symbol (seconds)
     ENTRY_COOLDOWN_SEC: int = int(os.getenv("ENTRY_COOLDOWN_SEC", "120"))
 
@@ -58,7 +59,7 @@ class Config:
         "NASDAQ:MSFT": "MSFT", "NASDAQ:AMZN": "AMZN",
         "NASDAQ:META": "META", "NASDAQ:GOOGL": "GOOGL",
         "NASDAQ:AVGO": "AVGO", "NASDAQ:AMD": "AMD",
-        "NYSE:TSLA": "TSLA",
+        "NASDAQ:TSLA": "TSLA", "NYSE:TSLA": "TSLA",
     }
 
     @property

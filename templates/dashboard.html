@@ -119,6 +119,23 @@
     }
     .limit-warn { color: #f87171; font-weight: 700; }
 
+    /* ── Signal state ── */
+    .sig-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+    .sig-val  { font-size: 0.78rem; font-weight: 700; }
+    .sig-age  { font-size: 0.6rem; color: #475569; }
+    .sig-buy  { color: #4ade80; }
+    .sig-sell { color: #f87171; }
+    .sig-up   { color: #4ade80; }
+    .sig-down { color: #f87171; }
+    .sig-none { color: #334155; }
+    .sig-stale { opacity: .45; }
+    .conf-yes { color: #4ade80; font-weight: 800; }
+    .conf-no  { color: #334155; }
+    .tag-ign  { background: #450a0a; color: #f87171; border: 1px solid #7f1d1d;
+                padding: 1px 6px; border-radius: 4px; font-size: 0.62rem; font-weight: 700; }
+    .tag-ok   { background: #052e16; color: #4ade80; border: 1px solid #14532d;
+                padding: 1px 6px; border-radius: 4px; font-size: 0.62rem; font-weight: 700; }
+
     @media (max-width: 1100px) {
       .kpi-grid { grid-template-columns: repeat(2, 1fr); }
       .charts-row, .charts-row-2 { grid-template-columns: 1fr; }
@@ -217,6 +234,12 @@
     </div>
   </div>
 
+  <!-- Signal State -->
+  <div class="table-card">
+    <div class="table-title">Signal State — live confluence tracker (window: 10 min)</div>
+    <div id="signalsWrap"><div class="empty">Loading…</div></div>
+  </div>
+
   <!-- Open Positions -->
   <div class="table-card">
     <div class="table-title">Open Positions</div>
@@ -227,6 +250,12 @@
   <div class="table-card">
     <div class="table-title">Trade History (last 100)</div>
     <div id="tradesWrap"><div class="empty">No trades yet — waiting for signals from TradingView…</div></div>
+  </div>
+
+  <!-- Webhook Log -->
+  <div class="table-card">
+    <div class="table-title">Webhook Log — recent TradingView hits</div>
+    <div id="logWrap"><div class="empty">No webhook hits received yet</div></div>
   </div>
 
 </div><!-- /container -->
@@ -276,17 +305,22 @@
   /* ── main fetch ── */
   async function refresh() {
     try {
-      const [sRes, tRes, pRes] = await Promise.all([
+      const [sRes, tRes, pRes, sigRes, logRes] = await Promise.all([
         fetch('/api/stats'), fetch('/api/trades'), fetch('/status'),
+        fetch('/api/signals'), fetch('/api/log'),
       ]);
-      const stats   = await sRes.json();
-      const { trades } = await tRes.json();
-      const status  = await pRes.json();
+      const stats          = await sRes.json();
+      const { trades }     = await tRes.json();
+      const status         = await pRes.json();
+      const signals        = await sigRes.json();
+      const { log }        = await logRes.json();
 
       renderKPIs(stats, status);
       renderCharts(trades);
+      renderSignals(signals);
       renderPositions(status);
       renderTrades(trades);
+      renderLog(log);
 
       document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
     } catch (e) {
@@ -427,6 +461,64 @@
         <td class="${clr}">${fmtPct(pnlPct)}</td>
         <td style="color:#475569">${dur}</td>
         <td style="color:#94a3b8;font-size:.72rem">${t.reason ?? ''}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  }
+
+  function renderSignals(signals) {
+    const wrap = document.getElementById('signalsWrap');
+    const syms = Object.keys(signals);
+    if (!syms.length) { wrap.innerHTML = '<div class="empty">No signal data yet</div>'; return; }
+
+    function sigCell(d, kind) {
+      if (!d || !d.signal) return '<div class="sig-cell"><span class="sig-val sig-none">—</span></div>';
+      const sigClass = 'sig-' + d.signal.toLowerCase();
+      const stale    = !d.fresh ? ' sig-stale' : '';
+      const age      = d.age_sec !== null ? (d.age_sec < 60 ? d.age_sec + 's' : Math.floor(d.age_sec / 60) + 'm' + (d.age_sec % 60) + 's') : '';
+      return `<div class="sig-cell${stale}"><span class="sig-val ${sigClass}">${d.signal.toUpperCase()}</span><span class="sig-age">${age}</span></div>`;
+    }
+
+    let html = '<table><thead><tr><th>Symbol</th><th>OT Bias</th><th>Conf</th><th>MR</th><th>Trend</th><th>Confluence?</th><th>Lots</th></tr></thead><tbody>';
+    syms.sort().forEach(sym => {
+      const s      = signals[sym];
+      const otCls  = s.macro_bias === 'up' ? 'sig-up' : 'sig-down';
+      const confCls = s.has_confluence ? 'conf-yes' : 'conf-no';
+      const confTxt = s.has_confluence ? '🟢 YES' : 'NO';
+      html += `<tr>
+        <td><b>${sym}</b></td>
+        <td class="${otCls}">${s.macro_bias.toUpperCase()}</td>
+        <td>${sigCell(s.conf,  'conf')}</td>
+        <td>${sigCell(s.mr,   'mr')}</td>
+        <td>${sigCell(s.trend,'trend')}</td>
+        <td class="${confCls}">${confTxt}</td>
+        <td class="grey">${s.lot_count}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  }
+
+  function renderLog(log) {
+    const wrap = document.getElementById('logWrap');
+    if (!log || !log.length) { wrap.innerHTML = '<div class="empty">No webhook hits received yet — check TradingView alert URLs</div>'; return; }
+
+    const recent = log.slice(0, 50);
+    let html = '<table><thead><tr><th>Time (UTC)</th><th>Symbol</th><th>Model</th><th>Signal</th><th>Price</th><th>Status</th></tr></thead><tbody>';
+    recent.forEach(h => {
+      const sigCls = h.signal === 'buy' || h.signal === 'up' ? 'green' : (h.signal === 'sell' || h.signal === 'down' ? 'red' : 'grey');
+      const rawTag = h.raw ? ` <span style="color:#475569;font-size:.65rem">(${h.raw})</span>` : '';
+      const status = h.ignored
+        ? '<span class="tag-ign">IGNORED</span>'
+        : '<span class="tag-ok">OK</span>';
+      html += `<tr>
+        <td style="color:#475569">${h.ts}</td>
+        <td><b>${h.symbol}</b>${rawTag}</td>
+        <td style="color:#94a3b8">${h.model}</td>
+        <td class="${sigCls}">${(h.signal || '').toUpperCase()}</td>
+        <td style="color:#64748b">$${h.price}</td>
+        <td>${status}</td>
       </tr>`;
     });
     html += '</tbody></table>';
