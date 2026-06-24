@@ -54,28 +54,30 @@ class RiskManager:
             if price is None:
                 continue
 
-            # Stop-loss: if ANY lot's SL is breached, close everything
+            # Stop-loss: direction-aware — longs SL below, shorts SL above
             for lot in lots:
-                if price <= lot.stop_price:
-                    loss_pct = (price - lot.entry_price) / lot.entry_price * 100
+                sl_hit = (price <= lot.stop_price) if lot.direction == "long" else (price >= lot.stop_price)
+                if sl_hit:
+                    loss_pct = abs(price - lot.entry_price) / lot.entry_price * 100
                     logger.warning(
-                        f"SL HIT {symbol}: price=${price:.4f} ≤ stop=${lot.stop_price:.4f} "
-                        f"({loss_pct:.2f}%)"
+                        f"SL HIT {symbol} ({lot.direction}): price=${price:.4f} "
+                        f"stop=${lot.stop_price:.4f} ({loss_pct:.2f}%)"
                     )
-                    self.signal_engine._exit_all(
+                    self.signal_engine.exit_position(
                         symbol, f"STOP-LOSS @ ${price:.4f} ({loss_pct:.2f}%)"
                     )
                     break
 
-            # Take-profit: only check newest lot (LIFO); stop-loss may have just closed it
+            # Take-profit: only check newest lot (LIFO); SL may have just closed it
             remaining = self.position_mgr.get_lots(symbol)
             if remaining:
                 newest = remaining[-1]
-                if price >= newest.take_profit_price:
-                    gain_pct = (price - newest.entry_price) / newest.entry_price * 100
+                tp_hit = (price >= newest.take_profit_price) if newest.direction == "long" else (price <= newest.take_profit_price)
+                if tp_hit:
+                    gain_pct = abs(price - newest.entry_price) / newest.entry_price * 100
                     logger.info(
-                        f"TP HIT {symbol}: price=${price:.4f} ≥ tp=${newest.take_profit_price:.4f} "
-                        f"(+{gain_pct:.2f}%)"
+                        f"TP HIT {symbol} ({newest.direction}): price=${price:.4f} "
+                        f"tp=${newest.take_profit_price:.4f} (+{gain_pct:.2f}%)"
                     )
                     self.signal_engine.exit_one_lot(
                         symbol, f"TAKE-PROFIT @ ${price:.4f} (+{gain_pct:.2f}%)"

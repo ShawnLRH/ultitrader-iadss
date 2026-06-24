@@ -16,6 +16,7 @@ class Lot:
     entry_price: float
     stop_price: float
     take_profit_price: float
+    direction: str = "long"   # "long" or "short"
     entry_time: float = field(default_factory=time.time)
 
 
@@ -31,7 +32,15 @@ class PositionManager:
 
     # ── Lot lifecycle ──────────────────────────────────────────────────────────
 
-    def add_lot(self, symbol: str, qty: float, fill_price: float) -> Lot:
+    def add_lot(self, symbol: str, qty: float, fill_price: float, direction: str = "long") -> Lot:
+        sl_pct = self.config.STOP_LOSS_PCT / 100
+        tp_pct = self.config.TAKE_PROFIT_PCT / 100
+        if direction == "long":
+            stop_price       = fill_price * (1 - sl_pct)
+            take_profit_price = fill_price * (1 + tp_pct)
+        else:  # short: SL above, TP below
+            stop_price       = fill_price * (1 + sl_pct)
+            take_profit_price = fill_price * (1 - tp_pct)
         with self._lock:
             self._counter += 1
             lot = Lot(
@@ -39,8 +48,9 @@ class PositionManager:
                 symbol=symbol,
                 qty=qty,
                 entry_price=fill_price,
-                stop_price=fill_price * (1 - self.config.STOP_LOSS_PCT / 100),
-                take_profit_price=fill_price * (1 + self.config.TAKE_PROFIT_PCT / 100),
+                stop_price=stop_price,
+                take_profit_price=take_profit_price,
+                direction=direction,
             )
             self._lots.setdefault(symbol, []).append(lot)
         logger.info(
@@ -73,6 +83,14 @@ class PositionManager:
     def get_all_open_symbols(self) -> List[str]:
         with self._lock:
             return [s for s, lots in self._lots.items() if lots]
+
+    def has_long_position(self, symbol: str) -> bool:
+        with self._lock:
+            return any(l.direction == "long" for l in self._lots.get(symbol, []))
+
+    def has_short_position(self, symbol: str) -> bool:
+        with self._lock:
+            return any(l.direction == "short" for l in self._lots.get(symbol, []))
 
     def avg_entry_price(self, symbol: str) -> Optional[float]:
         with self._lock:

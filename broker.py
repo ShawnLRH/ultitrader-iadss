@@ -74,6 +74,52 @@ class AlpacaBroker:
             logger.error(f"buy {symbol} ${notional_usd:.2f}: {e}")
             return None
 
+    def short(self, symbol: str, notional_usd: float) -> Optional[dict]:
+        """Open a short (sell short) by notional USD. Stocks only."""
+        try:
+            price = self.get_price(symbol)
+            if not price:
+                return None
+            qty = round(notional_usd / price, 6)
+            order = self.trading.submit_order(
+                MarketOrderRequest(
+                    symbol=symbol,
+                    qty=qty,
+                    side=OrderSide.SELL,
+                    time_in_force=TimeInForce.DAY,
+                )
+            )
+            time.sleep(0.8)
+            filled = self.trading.get_order_by_id(str(order.id))
+            fill_price = float(filled.filled_avg_price or 0)
+            fill_qty   = float(filled.filled_qty or 0)
+            logger.info(f"SHORT {symbol} ${notional_usd:.2f} → qty={fill_qty:.6f} @ ${fill_price:.4f}")
+            return {"order_id": str(order.id), "symbol": symbol, "fill_price": fill_price, "fill_qty": fill_qty}
+        except Exception as e:
+            logger.error(f"short {symbol}: {e}")
+            return None
+
+    def buy_qty(self, symbol: str, qty: float) -> Optional[dict]:
+        """Market buy by quantity (used to cover a short lot in LIFO partial exit)."""
+        try:
+            tif = TimeInForce.GTC if self.config.is_crypto(symbol) else TimeInForce.DAY
+            order = self.trading.submit_order(
+                MarketOrderRequest(
+                    symbol=symbol,
+                    qty=round(qty, 6),
+                    side=OrderSide.BUY,
+                    time_in_force=tif,
+                )
+            )
+            time.sleep(0.8)
+            filled = self.trading.get_order_by_id(str(order.id))
+            fill_price = float(filled.filled_avg_price or 0)
+            logger.info(f"BUY_QTY {symbol} qty={qty:.6f} @ ${fill_price:.4f}")
+            return {"order_id": str(order.id), "fill_price": fill_price}
+        except Exception as e:
+            logger.error(f"buy_qty {symbol}: {e}")
+            return None
+
     def sell_qty(self, symbol: str, qty: float) -> Optional[dict]:
         """Market sell by quantity (for LIFO partial exits)."""
         try:

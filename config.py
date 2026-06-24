@@ -22,11 +22,13 @@ class Config:
     MAX_DAILY_LOSSES: int = int(os.getenv("MAX_DAILY_LOSSES", "3"))
     DAILY_DRAWDOWN_USD: float = float(os.getenv("DAILY_DRAWDOWN_USD", "300"))
 
-    # IADSS confluence window – all 3 models must fire within this many seconds
-    # 600s (10 min) = 2 bars on a 5-min chart; 300s was too tight and caused 0 trades
-    SIGNAL_WINDOW_SEC: int = int(os.getenv("SIGNAL_WINDOW_SEC", "600"))
+    # IADSS confluence window – signals from any model remain valid for this long.
+    # 2700s (45 min) = 9 bars on a 5-min chart; wide enough for realistic alignment.
+    SIGNAL_WINDOW_SEC: int = int(os.getenv("SIGNAL_WINDOW_SEC", "2700"))
     # Cooldown after entry before re-entering same symbol (seconds)
-    ENTRY_COOLDOWN_SEC: int = int(os.getenv("ENTRY_COOLDOWN_SEC", "120"))
+    ENTRY_COOLDOWN_SEC: int = int(os.getenv("ENTRY_COOLDOWN_SEC", "60"))
+    # Allow short selling stocks (not crypto – Alpaca crypto is long-only)
+    ALLOW_SHORTS: bool = os.getenv("ALLOW_SHORTS", "true").lower() == "true"
 
     # Webhook server
     WEBHOOK_PORT: int = int(os.getenv("PORT") or os.getenv("WEBHOOK_PORT", "3000"))
