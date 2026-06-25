@@ -9,3 +9,5 @@ __pycache__/
 *.json
 ia-ptos-state.json
 ptos-state.json
+trades.csv
+fix_googl_trade.py

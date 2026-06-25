@@ -21,15 +21,19 @@ class TradeLogger:
     def __init__(self, filepath: str = "trades.csv"):
         self.filepath = Path(filepath)
         self._lock = Lock()
-        if not self.filepath.exists():
-            # Restore known-good historical trades from seed so deploys don't wipe history
-            if SEED_FILE.exists():
-                import shutil
-                shutil.copy(SEED_FILE, self.filepath)
-                logger.info(f"Seeded {self.filepath} from {SEED_FILE}")
-            else:
-                with open(self.filepath, "w", newline="") as f:
-                    csv.DictWriter(f, fieldnames=FIELDS).writeheader()
+        # Seed from trades_seed.csv if file is missing or contains only the header row
+        needs_seed = (
+            not self.filepath.exists()
+            or self.filepath.stat().st_size == 0
+            or len(self.get_all_trades()) == 0
+        )
+        if needs_seed and SEED_FILE.exists():
+            import shutil
+            shutil.copy(SEED_FILE, self.filepath)
+            logger.info(f"Seeded {self.filepath} from {SEED_FILE}")
+        elif not self.filepath.exists():
+            with open(self.filepath, "w", newline="") as f:
+                csv.DictWriter(f, fieldnames=FIELDS).writeheader()
 
     def log_trade(
         self, symbol: str, lot_id: str, entry_time: float,
