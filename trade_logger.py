@@ -14,13 +14,22 @@ FIELDS = [
 ]
 
 
+SEED_FILE = Path(__file__).parent / "trades_seed.csv"
+
+
 class TradeLogger:
     def __init__(self, filepath: str = "trades.csv"):
         self.filepath = Path(filepath)
         self._lock = Lock()
         if not self.filepath.exists():
-            with open(self.filepath, "w", newline="") as f:
-                csv.DictWriter(f, fieldnames=FIELDS).writeheader()
+            # Restore known-good historical trades from seed so deploys don't wipe history
+            if SEED_FILE.exists():
+                import shutil
+                shutil.copy(SEED_FILE, self.filepath)
+                logger.info(f"Seeded {self.filepath} from {SEED_FILE}")
+            else:
+                with open(self.filepath, "w", newline="") as f:
+                    csv.DictWriter(f, fieldnames=FIELDS).writeheader()
 
     def log_trade(
         self, symbol: str, lot_id: str, entry_time: float,
