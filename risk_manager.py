@@ -58,7 +58,23 @@ class RiskManager:
             for lot in lots:
                 sl_hit = (price <= lot.stop_price) if lot.direction == "long" else (price >= lot.stop_price)
                 if sl_hit:
+                    # Double-check: if loss > 5× configured SL%, verify with a second fetch
+                    # to guard against stale/one-sided NBBO returning wrong prices.
                     loss_pct = abs(price - lot.entry_price) / lot.entry_price * 100
+                    if loss_pct > self.config.STOP_LOSS_PCT * 5:
+                        verify = self.broker.get_price(symbol)
+                        if verify is None:
+                            logger.warning(f"SL verify failed for {symbol} (no price) — skipping")
+                            break
+                        sl_still_hit = (verify <= lot.stop_price) if lot.direction == "long" else (verify >= lot.stop_price)
+                        if not sl_still_hit:
+                            logger.warning(
+                                f"SL false positive {symbol}: first=${price:.4f} verify=${verify:.4f} "
+                                f"stop=${lot.stop_price:.4f} — skipping"
+                            )
+                            break
+                        price = verify
+                        loss_pct = abs(price - lot.entry_price) / lot.entry_price * 100
                     logger.warning(
                         f"SL HIT {symbol} ({lot.direction}): price=${price:.4f} "
                         f"stop=${lot.stop_price:.4f} ({loss_pct:.2f}%)"

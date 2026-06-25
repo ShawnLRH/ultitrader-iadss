@@ -7,7 +7,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
-from alpaca.data.requests import StockLatestQuoteRequest, CryptoLatestQuoteRequest
+from alpaca.data.requests import StockLatestQuoteRequest, StockLatestTradeRequest, CryptoLatestQuoteRequest
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +29,21 @@ class AlpacaBroker:
     # ── Price queries ──────────────────────────────────────────────────────────
 
     def get_price(self, symbol: str) -> Optional[float]:
-        """Return current mid-price (ask+bid)/2, or None on error."""
+        """Return current price. Stocks use last trade; crypto uses quote mid."""
         try:
             if self.config.is_crypto(symbol):
                 req = CryptoLatestQuoteRequest(symbol_or_symbols=symbol)
                 q = self.crypto_data.get_crypto_latest_quote(req)[symbol]
-                return round((float(q.ask_price) + float(q.bid_price)) / 2, 6)
+                ask, bid = float(q.ask_price), float(q.bid_price)
+                if ask > 0 and bid > 0:
+                    return round((ask + bid) / 2, 6)
+                return round(ask or bid, 6) or None
             else:
-                req = StockLatestQuoteRequest(symbol_or_symbols=symbol)
-                q = self.stock_data.get_stock_latest_quote(req)[symbol]
-                return round((float(q.ask_price) + float(q.bid_price)) / 2, 4)
+                # Use last trade price — avoids stale one-sided NBBO at open/close
+                # where ask=0 causes (ask+bid)/2 to return half the real price.
+                req = StockLatestTradeRequest(symbol_or_symbols=symbol)
+                t = self.stock_data.get_stock_latest_trade(req)[symbol]
+                return round(float(t.price), 4)
         except Exception as e:
             logger.warning(f"get_price {symbol}: {e}")
             return None
@@ -57,11 +62,15 @@ class AlpacaBroker:
                     time_in_force=tif,
                 )
             )
-            # Brief wait for market-order fill
-            time.sleep(0.8)
-            filled = self.trading.get_order_by_id(str(order.id))
-            fill_price = float(filled.filled_avg_price or 0)
-            fill_qty = float(filled.filled_qty or 0)
+            # Poll until filled (up to 5s); single 0.8s sleep risks returning before fill
+            fill_price, fill_qty = 0.0, 0.0
+            for _ in range(10):
+                time.sleep(0.5)
+                filled = self.trading.get_order_by_id(str(order.id))
+                fill_price = float(filled.filled_avg_price or 0)
+                fill_qty   = float(filled.filled_qty or 0)
+                if fill_price > 0:
+                    break
             logger.info(f"BUY {symbol} ${notional_usd:.2f} → qty={fill_qty:.6f} @ ${fill_price:.4f}")
             return {
                 "order_id": str(order.id),
@@ -89,10 +98,14 @@ class AlpacaBroker:
                     time_in_force=TimeInForce.DAY,
                 )
             )
-            time.sleep(0.8)
-            filled = self.trading.get_order_by_id(str(order.id))
-            fill_price = float(filled.filled_avg_price or 0)
-            fill_qty   = float(filled.filled_qty or 0)
+            fill_price, fill_qty = 0.0, 0.0
+            for _ in range(10):
+                time.sleep(0.5)
+                filled = self.trading.get_order_by_id(str(order.id))
+                fill_price = float(filled.filled_avg_price or 0)
+                fill_qty   = float(filled.filled_qty or 0)
+                if fill_price > 0:
+                    break
             logger.info(f"SHORT {symbol} ${notional_usd:.2f} → qty={fill_qty:.6f} @ ${fill_price:.4f}")
             return {"order_id": str(order.id), "symbol": symbol, "fill_price": fill_price, "fill_qty": fill_qty}
         except Exception as e:
@@ -111,9 +124,13 @@ class AlpacaBroker:
                     time_in_force=tif,
                 )
             )
-            time.sleep(0.8)
-            filled = self.trading.get_order_by_id(str(order.id))
-            fill_price = float(filled.filled_avg_price or 0)
+            fill_price = 0.0
+            for _ in range(10):
+                time.sleep(0.5)
+                filled = self.trading.get_order_by_id(str(order.id))
+                fill_price = float(filled.filled_avg_price or 0)
+                if fill_price > 0:
+                    break
             logger.info(f"BUY_QTY {symbol} qty={qty:.6f} @ ${fill_price:.4f}")
             return {"order_id": str(order.id), "fill_price": fill_price}
         except Exception as e:
@@ -132,9 +149,13 @@ class AlpacaBroker:
                     time_in_force=tif,
                 )
             )
-            time.sleep(0.8)
-            filled = self.trading.get_order_by_id(str(order.id))
-            fill_price = float(filled.filled_avg_price or 0)
+            fill_price = 0.0
+            for _ in range(10):
+                time.sleep(0.5)
+                filled = self.trading.get_order_by_id(str(order.id))
+                fill_price = float(filled.filled_avg_price or 0)
+                if fill_price > 0:
+                    break
             logger.info(f"SELL {symbol} qty={qty:.6f} @ ${fill_price:.4f}")
             return {"order_id": str(order.id), "fill_price": fill_price}
         except Exception as e:

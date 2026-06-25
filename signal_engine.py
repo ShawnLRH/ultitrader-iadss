@@ -198,8 +198,10 @@ class SignalEngine:
             logger.error(f"{symbol}: buy order failed")
             return
 
-        fill_price = result.get("fill_price") or signal_price
-        fill_qty   = result.get("fill_qty") or (lot_usd / signal_price)
+        _fp = result.get("fill_price")
+        _fq = result.get("fill_qty")
+        fill_price = _fp if _fp else (self.broker.get_price(symbol) or signal_price)
+        fill_qty   = _fq if _fq else (lot_usd / fill_price)
         lot = self.position_mgr.add_lot(symbol, fill_qty, fill_price, direction="long")
         state.mark_entry()
 
@@ -221,8 +223,10 @@ class SignalEngine:
             logger.error(f"{symbol}: short order failed")
             return
 
-        fill_price = result.get("fill_price") or signal_price
-        fill_qty   = result.get("fill_qty") or (lot_usd / signal_price)
+        _fp = result.get("fill_price")
+        _fq = result.get("fill_qty")
+        fill_price = _fp if _fp else (self.broker.get_price(symbol) or signal_price)
+        fill_qty   = _fq if _fq else (lot_usd / fill_price)
         lot = self.position_mgr.add_lot(symbol, fill_qty, fill_price, direction="short")
         state.mark_entry()
 

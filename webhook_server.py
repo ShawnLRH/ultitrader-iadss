@@ -108,4 +108,35 @@ def create_app(config, signal_engine, alerter, trade_logger=None):
         """Current per-symbol signal state (freshness, confluence, macro bias)."""
         return jsonify(signal_engine.get_signal_state())
 
+    @app.route("/admin/patch-trade", methods=["POST"])
+    def admin_patch_trade():
+        """Patch a specific trade row in trades.csv (admin use only)."""
+        secret = request.headers.get("X-Secret", "") or request.args.get("secret", "")
+        if config.WEBHOOK_SECRET and secret != config.WEBHOOK_SECRET:
+            return jsonify({"error": "unauthorized"}), 401
+        if trade_logger is None:
+            return jsonify({"error": "no trade logger"}), 500
+        data = request.get_json(force=True, silent=True) or {}
+        lot_id = data.get("lot_id", "")
+        if not lot_id:
+            return jsonify({"error": "lot_id required"}), 400
+        trades = trade_logger.get_all_trades()
+        patched = False
+        for t in trades:
+            if t["lot_id"] == lot_id:
+                for field in ("exit_price", "pnl_usd", "pnl_pct", "reason", "exit_time"):
+                    if field in data:
+                        t[field] = data[field]
+                patched = True
+        if not patched:
+            return jsonify({"error": f"lot_id {lot_id} not found"}), 404
+        import csv
+        from trade_logger import FIELDS
+        with open(trade_logger.filepath, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=FIELDS)
+            w.writeheader()
+            w.writerows(trades)
+        logger.info(f"Admin patched trade {lot_id}")
+        return jsonify({"status": "ok", "lot_id": lot_id})
+
     return app
