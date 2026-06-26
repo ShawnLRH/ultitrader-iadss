@@ -49,23 +49,44 @@ class Config:
     STOCK_SYMBOLS: list = [
         "NVDA", "TSLA", "AAPL", "MSFT", "AMZN",
         "META", "GOOGL", "AVGO", "AMD",
+        "WMT", "GME", "SPY", "JPM", "MSTR", "SPCX",
     ]
-    CRYPTO_SYMBOLS: list = ["BTC/USD", "SOL/USD", "ETH/USD"]
+    CRYPTO_SYMBOLS: list = [
+        "BTC/USD", "SOL/USD", "ETH/USD",
+        "DOGE/USD", "XRP/USD", "AVAX/USD", "AAVE/USD", "LINK/USD",
+    ]
 
     # TradingView ticker → Alpaca symbol normalisation
     _TV_MAP: dict = {
+        # Existing crypto
         "BTCUSD": "BTC/USD", "BTCUSDT": "BTC/USD",
         "COINBASE:BTCUSD": "BTC/USD", "BINANCE:BTCUSDT": "BTC/USD",
         "ETHUSD": "ETH/USD", "ETHUSDT": "ETH/USD",
         "COINBASE:ETHUSD": "ETH/USD", "BINANCE:ETHUSDT": "ETH/USD",
         "SOLUSD": "SOL/USD", "SOLUSDT": "SOL/USD",
         "COINBASE:SOLUSD": "SOL/USD", "BINANCE:SOLUSDT": "SOL/USD",
-        # Stock exchanges sometimes prefix with exchange code
+        # New crypto
+        "DOGEUSD": "DOGE/USD", "DOGEUSDT": "DOGE/USD",
+        "COINBASE:DOGEUSD": "DOGE/USD", "BINANCE:DOGEUSDT": "DOGE/USD",
+        "XRPUSD": "XRP/USD", "XRPUSDT": "XRP/USD",
+        "COINBASE:XRPUSD": "XRP/USD", "BINANCE:XRPUSDT": "XRP/USD",
+        "AVAXUSD": "AVAX/USD", "AVAXUSDT": "AVAX/USD",
+        "COINBASE:AVAXUSD": "AVAX/USD", "BINANCE:AVAXUSDT": "AVAX/USD",
+        "AAVEUSD": "AAVE/USD", "AAVEUSDT": "AAVE/USD",
+        "COINBASE:AAVEUSD": "AAVE/USD", "BINANCE:AAVEUSDT": "AAVE/USD",
+        "LINKUSD": "LINK/USD", "LINKUSDT": "LINK/USD",
+        "COINBASE:LINKUSD": "LINK/USD", "BINANCE:LINKUSDT": "LINK/USD",
+        # Existing stocks (exchange-prefixed variants)
         "NASDAQ:NVDA": "NVDA", "NASDAQ:AAPL": "AAPL",
         "NASDAQ:MSFT": "MSFT", "NASDAQ:AMZN": "AMZN",
         "NASDAQ:META": "META", "NASDAQ:GOOGL": "GOOGL",
         "NASDAQ:AVGO": "AVGO", "NASDAQ:AMD": "AMD",
         "NASDAQ:TSLA": "TSLA", "NYSE:TSLA": "TSLA",
+        # New stocks (exchange-prefixed variants)
+        "NYSE:WMT": "WMT", "NYSE:GME": "GME",
+        "NYSE:JPM": "JPM", "NASDAQ:MSTR": "MSTR",
+        "AMEX:SPY": "SPY", "NYSE:SPY": "SPY",
+        "AMEX:SPCX": "SPCX", "NYSE:SPCX": "SPCX",
     }
 
     @property
