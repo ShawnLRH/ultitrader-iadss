@@ -42,6 +42,8 @@ class Config:
     MONITOR_INTERVAL_SEC: int = int(os.getenv("MONITOR_INTERVAL_SEC", "30"))
     # Seconds after 9:30 AM ET open to block stock entries (avoids open volatility)
     OPEN_BUFFER_SEC: int = int(os.getenv("OPEN_BUFFER_SEC", "1800"))
+    # Minimum unrealized profit (USD) required before Trend=SELL alone can exit a long
+    TREND_EXIT_MIN_PROFIT_USD: float = float(os.getenv("TREND_EXIT_MIN_PROFIT_USD", "3.0"))
 
     # Target assets
     STOCK_SYMBOLS: list = [

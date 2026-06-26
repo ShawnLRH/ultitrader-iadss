@@ -69,11 +69,13 @@ class _SymbolState:
         """Conf=SELL + MR=SELL both required. Trend=SELL not needed for entry."""
         return self._fresh(self.conf, SIGNAL_SELL) and self._fresh(self.mr, SIGNAL_SELL)
 
-    def has_long_exit_signal(self) -> bool:
-        """Fast exit for longs: Trend flip alone, or Conf+MR both sell."""
-        trend_sell = self._fresh(self.trend, SIGNAL_SELL)
-        both_sell  = self._fresh(self.conf,  SIGNAL_SELL) and self._fresh(self.mr, SIGNAL_SELL)
-        return trend_sell or both_sell
+    def has_trend_sell_signal(self) -> bool:
+        """Trend flipped to SELL (freshness only — profit check happens at SignalEngine level)."""
+        return self._fresh(self.trend, SIGNAL_SELL)
+
+    def has_full_exit_signal(self) -> bool:
+        """Conf=SELL + MR=SELL both fresh — always exits regardless of P&L."""
+        return self._fresh(self.conf, SIGNAL_SELL) and self._fresh(self.mr, SIGNAL_SELL)
 
     def in_cooldown(self, cooldown: int) -> bool:
         return (time.time() - self._last_entry) < cooldown
@@ -136,9 +138,15 @@ class SignalEngine:
                 logger.info(f"[{symbol}] OT macro → {state.macro_bias} (advisory)")
 
             # Exit LONG on sell signal
-            if has_long and state.has_long_exit_signal():
-                self._exit_position(symbol, f"IADSS sell ({model})")
-                return
+            if has_long:
+                if state.has_full_exit_signal():
+                    self._exit_position(symbol, f"IADSS sell (conf+mr)")
+                    return
+                if state.has_trend_sell_signal():
+                    pnl = self._get_unrealized_pnl(symbol)
+                    if pnl >= self.config.TREND_EXIT_MIN_PROFIT_USD:
+                        self._exit_position(symbol, f"IADSS sell (trend) @ +${pnl:.2f}")
+                        return
 
             # Exit SHORT on buy confluence
             if has_short and state.has_buy_confluence():
@@ -156,6 +164,24 @@ class SignalEngine:
                     and not self.config.is_crypto(symbol)
                     and self._can_enter_short(symbol, state)):
                 self._enter_short(symbol, price, state)
+
+    # ── P&L helper ─────────────────────────────────────────────────────────────
+
+    def _get_unrealized_pnl(self, symbol: str) -> float:
+        """Sum unrealized P&L across all open lots for symbol."""
+        lots = self.position_mgr.get_lots(symbol)
+        if not lots:
+            return 0.0
+        current_price = self.broker.get_price(symbol)
+        if not current_price:
+            return 0.0
+        total = 0.0
+        for lot in lots:
+            if lot.direction == "long":
+                total += (current_price - lot.entry_price) * lot.qty
+            else:
+                total += (lot.entry_price - current_price) * lot.qty
+        return total
 
     # ── Entry gates ────────────────────────────────────────────────────────────
 
