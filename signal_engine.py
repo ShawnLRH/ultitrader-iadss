@@ -3,18 +3,22 @@ IADSS Signal Engine
 -------------------
 Tracks signals from TradingView for three IADSS models per symbol.
 
-Entry rules (2-of-3 confluence — scalping mode):
-  LONG:  Confluence=BUY  + (MR=BUY  OR Trend=BUY)  within SIGNAL_WINDOW_SEC
-  SHORT: Confluence=SELL + (MR=SELL OR Trend=SELL)  within SIGNAL_WINDOW_SEC
+Entry rules:
+  LONG:  Confluence=BUY + MR=BUY (both required) within SIGNAL_WINDOW_SEC
+  SHORT: Confluence=SELL + MR=SELL (both required) within SIGNAL_WINDOW_SEC
+  Trend=BUY/SELL is NOT required for entry — it influences exits only.
   (stocks only for shorts; crypto is long-only on Alpaca)
 
 Exit rules:
   LONG exit:  Trend=SELL alone OR (Conf=SELL + MR=SELL) OR SL/TP
-  SHORT exit: Confluence=BUY (2-of-3 as above) OR SL/TP
+  SHORT exit: Confluence=BUY (Conf+MR as above) OR SL/TP
 
-OT macro is advisory only — logged but never blocks a trade.
+Entry guards:
+  - Stock entries blocked within OPEN_BUFFER_SEC of 9:30 AM ET (default 30 min)
+  - OT macro is advisory only — logged but never blocks a trade
 """
 import time
+import datetime
 import logging
 from collections import deque
 from threading import Lock
@@ -58,18 +62,12 @@ class _SymbolState:
         return bool(d) and d.get("signal") == signal_val and (time.time() - d["ts"]) <= self.window
 
     def has_buy_confluence(self) -> bool:
-        """2-of-3: Conf=BUY + at least one of MR=BUY or Trend=BUY."""
-        conf_buy  = self._fresh(self.conf,  SIGNAL_BUY)
-        mr_buy    = self._fresh(self.mr,    SIGNAL_BUY)
-        trend_buy = self._fresh(self.trend, SIGNAL_BUY)
-        return conf_buy and (mr_buy or trend_buy)
+        """Conf=BUY + MR=BUY both required. Trend=BUY not needed for entry."""
+        return self._fresh(self.conf, SIGNAL_BUY) and self._fresh(self.mr, SIGNAL_BUY)
 
     def has_short_confluence(self) -> bool:
-        """2-of-3: Conf=SELL + at least one of MR=SELL or Trend=SELL."""
-        conf_sell  = self._fresh(self.conf,  SIGNAL_SELL)
-        mr_sell    = self._fresh(self.mr,    SIGNAL_SELL)
-        trend_sell = self._fresh(self.trend, SIGNAL_SELL)
-        return conf_sell and (mr_sell or trend_sell)
+        """Conf=SELL + MR=SELL both required. Trend=SELL not needed for entry."""
+        return self._fresh(self.conf, SIGNAL_SELL) and self._fresh(self.mr, SIGNAL_SELL)
 
     def has_long_exit_signal(self) -> bool:
         """Fast exit for longs: Trend flip alone, or Conf+MR both sell."""
@@ -161,6 +159,18 @@ class SignalEngine:
 
     # ── Entry gates ────────────────────────────────────────────────────────────
 
+    def _in_open_buffer(self) -> bool:
+        """True if within OPEN_BUFFER_SEC of 9:30 AM ET (stocks only)."""
+        try:
+            from zoneinfo import ZoneInfo
+            now_et = datetime.datetime.now(tz=ZoneInfo("America/New_York"))
+        except Exception:
+            # zoneinfo unavailable — skip buffer
+            return False
+        open_et = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+        elapsed = (now_et - open_et).total_seconds()
+        return 0 <= elapsed < self.config.OPEN_BUFFER_SEC
+
     def _can_enter_long(self, symbol: str, state: _SymbolState) -> bool:
         if not state.has_buy_confluence():
             return False
@@ -174,6 +184,9 @@ class SignalEngine:
             return False
         if not self.config.is_crypto(symbol) and not self.broker.is_market_open():
             return False
+        if not self.config.is_crypto(symbol) and self._in_open_buffer():
+            logger.info(f"{symbol}: market-open buffer active ({self.config.OPEN_BUFFER_SEC}s)")
+            return False
         return True
 
     def _can_enter_short(self, symbol: str, state: _SymbolState) -> bool:
@@ -186,6 +199,9 @@ class SignalEngine:
         if state.in_cooldown(self.config.ENTRY_COOLDOWN_SEC):
             return False
         if not self.broker.is_market_open():
+            return False
+        if self._in_open_buffer():
+            logger.info(f"{symbol}: market-open buffer active ({self.config.OPEN_BUFFER_SEC}s)")
             return False
         return True
 

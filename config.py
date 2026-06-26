@@ -23,8 +23,8 @@ class Config:
     DAILY_DRAWDOWN_USD: float = float(os.getenv("DAILY_DRAWDOWN_USD", "300"))
 
     # IADSS confluence window – signals from any model remain valid for this long.
-    # 2700s (45 min) = 9 bars on a 5-min chart; wide enough for realistic alignment.
-    SIGNAL_WINDOW_SEC: int = int(os.getenv("SIGNAL_WINDOW_SEC", "2700"))
+    # 1200s (20 min) = 4 bars on a 5-min chart; fresh enough to be meaningful.
+    SIGNAL_WINDOW_SEC: int = int(os.getenv("SIGNAL_WINDOW_SEC", "1200"))
     # Cooldown after entry before re-entering same symbol (seconds)
     ENTRY_COOLDOWN_SEC: int = int(os.getenv("ENTRY_COOLDOWN_SEC", "60"))
     # Allow short selling stocks (not crypto – Alpaca crypto is long-only)
@@ -40,6 +40,8 @@ class Config:
 
     # Monitor loop frequency
     MONITOR_INTERVAL_SEC: int = int(os.getenv("MONITOR_INTERVAL_SEC", "30"))
+    # Seconds after 9:30 AM ET open to block stock entries (avoids open volatility)
+    OPEN_BUFFER_SEC: int = int(os.getenv("OPEN_BUFFER_SEC", "1800"))
 
     # Target assets
     STOCK_SYMBOLS: list = [
