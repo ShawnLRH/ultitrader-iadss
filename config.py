@@ -47,18 +47,32 @@ class Config:
 
     # Target assets
     STOCK_SYMBOLS: list = [
+        # Original core
         "NVDA", "TSLA", "AAPL", "MSFT", "AMZN",
         "META", "GOOGL", "AVGO", "AMD",
         "WMT", "GME", "SPY", "JPM",
+        # Added: high-beta / high-signal-frequency scalping candidates
+        "QQQ",   # NASDAQ-100 ETF — most liquid, fires signals constantly
+        "COIN",  # Coinbase — crypto-correlated, high volatility
+        "PLTR",  # Palantir — popular momentum stock
+        "MARA",  # Bitcoin miner — extreme volatility, crypto-correlated
+        "RIOT",  # Bitcoin miner — extreme volatility, crypto-correlated
     ]
     CRYPTO_SYMBOLS: list = [
+        # Original core
         "BTC/USD", "SOL/USD", "ETH/USD",
         "DOGE/USD", "XRP/USD", "AVAX/USD", "LINK/USD",
+        # Added for 24/7 night coverage
+        "ADA/USD",   # Cardano — high volume
+        "LTC/USD",   # Litecoin — established, active
+        "MATIC/USD", # Polygon — high frequency signals
+        "DOT/USD",   # Polkadot — active
+        "BCH/USD",   # Bitcoin Cash — decent volume
     ]
 
     # TradingView ticker → Alpaca symbol normalisation
     _TV_MAP: dict = {
-        # Crypto
+        # Crypto — existing
         "BTCUSD": "BTC/USD", "BTCUSDT": "BTC/USD",
         "COINBASE:BTCUSD": "BTC/USD", "BINANCE:BTCUSDT": "BTC/USD",
         "ETHUSD": "ETH/USD", "ETHUSDT": "ETH/USD",
@@ -73,7 +87,18 @@ class Config:
         "COINBASE:AVAXUSD": "AVAX/USD", "BINANCE:AVAXUSDT": "AVAX/USD",
         "LINKUSD": "LINK/USD", "LINKUSDT": "LINK/USD",
         "COINBASE:LINKUSD": "LINK/USD", "BINANCE:LINKUSDT": "LINK/USD",
-        # Stocks (exchange-prefixed variants TV sometimes sends)
+        # Crypto — new additions
+        "ADAUSD": "ADA/USD", "ADAUSDT": "ADA/USD",
+        "COINBASE:ADAUSD": "ADA/USD", "BINANCE:ADAUSDT": "ADA/USD",
+        "LTCUSD": "LTC/USD", "LTCUSDT": "LTC/USD",
+        "COINBASE:LTCUSD": "LTC/USD", "BINANCE:LTCUSDT": "LTC/USD",
+        "MATICUSD": "MATIC/USD", "MATICUSDT": "MATIC/USD",
+        "COINBASE:MATICUSD": "MATIC/USD", "BINANCE:MATICUSDT": "MATIC/USD",
+        "DOTUSD": "DOT/USD", "DOTUSDT": "DOT/USD",
+        "COINBASE:DOTUSD": "DOT/USD", "BINANCE:DOTUSDT": "DOT/USD",
+        "BCHUSD": "BCH/USD", "BCHUSDT": "BCH/USD",
+        "COINBASE:BCHUSD": "BCH/USD", "BINANCE:BCHUSDT": "BCH/USD",
+        # Stocks — existing
         "NASDAQ:NVDA": "NVDA", "NASDAQ:AAPL": "AAPL",
         "NASDAQ:MSFT": "MSFT", "NASDAQ:AMZN": "AMZN",
         "NASDAQ:META": "META", "NASDAQ:GOOGL": "GOOGL",
@@ -82,6 +107,12 @@ class Config:
         "NYSE:WMT": "WMT", "NYSE:GME": "GME",
         "NYSE:JPM": "JPM",
         "AMEX:SPY": "SPY", "NYSE:SPY": "SPY",
+        # Stocks — new additions
+        "NASDAQ:QQQ": "QQQ", "AMEX:QQQ": "QQQ",
+        "NASDAQ:COIN": "COIN",
+        "NASDAQ:PLTR": "PLTR",
+        "NASDAQ:MARA": "MARA",
+        "NASDAQ:RIOT": "RIOT",
     }
 
     @property

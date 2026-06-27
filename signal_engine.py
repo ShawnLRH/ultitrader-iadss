@@ -4,14 +4,14 @@ IADSS Signal Engine
 Tracks signals from TradingView for three IADSS models per symbol.
 
 Entry rules:
-  LONG:  Confluence=BUY + MR=BUY (both required) within SIGNAL_WINDOW_SEC
-  SHORT: Confluence=SELL + MR=SELL (both required) within SIGNAL_WINDOW_SEC
-  Trend=BUY/SELL is NOT required for entry — it influences exits only.
+  LONG:  Confluence=BUY required + (MR=BUY OR Trend=BUY) as confirmation
+  SHORT: Confluence=SELL required + (MR=SELL OR Trend=SELL) as confirmation
+  Conf is always required; MR or Trend provides the second confirmation.
   (stocks only for shorts; crypto is long-only on Alpaca)
 
 Exit rules:
-  LONG exit:  Trend=SELL alone OR (Conf=SELL + MR=SELL) OR SL/TP
-  SHORT exit: Confluence=BUY (Conf+MR as above) OR SL/TP
+  LONG exit:  Trend=SELL alone (profit-gated) OR (Conf=SELL + MR=SELL) OR SL/TP
+  SHORT exit: Conf=BUY + (MR=BUY OR Trend=BUY) OR SL/TP
 
 Entry guards:
   - Stock entries blocked within OPEN_BUFFER_SEC of 9:30 AM ET (default 30 min)
@@ -62,20 +62,29 @@ class _SymbolState:
         return bool(d) and d.get("signal") == signal_val and (time.time() - d["ts"]) <= self.window
 
     def has_buy_confluence(self) -> bool:
-        """Conf=BUY + MR=BUY both required. Trend=BUY not needed for entry."""
-        return self._fresh(self.conf, SIGNAL_BUY) and self._fresh(self.mr, SIGNAL_BUY)
+        """Conf=BUY required + (MR=BUY OR Trend=BUY) as confirmation."""
+        conf_ok  = self._fresh(self.conf,  SIGNAL_BUY)
+        mr_ok    = self._fresh(self.mr,    SIGNAL_BUY)
+        trend_ok = self._fresh(self.trend, SIGNAL_BUY)
+        return conf_ok and (mr_ok or trend_ok)
 
     def has_short_confluence(self) -> bool:
-        """Conf=SELL + MR=SELL both required. Trend=SELL not needed for entry."""
-        return self._fresh(self.conf, SIGNAL_SELL) and self._fresh(self.mr, SIGNAL_SELL)
+        """Conf=SELL required + (MR=SELL OR Trend=SELL) as confirmation."""
+        conf_ok  = self._fresh(self.conf,  SIGNAL_SELL)
+        mr_ok    = self._fresh(self.mr,    SIGNAL_SELL)
+        trend_ok = self._fresh(self.trend, SIGNAL_SELL)
+        return conf_ok and (mr_ok or trend_ok)
 
     def has_trend_sell_signal(self) -> bool:
         """Trend flipped to SELL (freshness only — profit check happens at SignalEngine level)."""
         return self._fresh(self.trend, SIGNAL_SELL)
 
     def has_full_exit_signal(self) -> bool:
-        """Conf=SELL + MR=SELL both fresh — always exits regardless of P&L."""
-        return self._fresh(self.conf, SIGNAL_SELL) and self._fresh(self.mr, SIGNAL_SELL)
+        """Conf=SELL + (MR=SELL OR Trend=SELL) both fresh — exits regardless of P&L."""
+        conf_ok  = self._fresh(self.conf,  SIGNAL_SELL)
+        mr_ok    = self._fresh(self.mr,    SIGNAL_SELL)
+        trend_ok = self._fresh(self.trend, SIGNAL_SELL)
+        return conf_ok and (mr_ok or trend_ok)
 
     def in_cooldown(self, cooldown: int) -> bool:
         return (time.time() - self._last_entry) < cooldown
