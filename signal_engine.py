@@ -4,16 +4,16 @@ IADSS Signal Engine
 Tracks signals from TradingView for three IADSS models per symbol.
 
 Entry rules (STATE-BASED — no time window):
-  LONG:  Conf=BUY state + (MR=BUY OR Trend=BUY) state currently active
-  SHORT: Conf=SELL state + (MR=SELL OR Trend=SELL) state currently active
-  Signals stay active until the OPPOSITE signal fires — matching what TradingView
-  shows visually. Both indicators "green" on TV = entry valid here.
+  LONG:  Conf=BUY + any of (MR=BUY, Trend=BUY, OT=BUY) currently active
+  SHORT: Conf=SELL + any of (MR=SELL, Trend=SELL, OT=SELL) currently active
+  All 4 signals hold their state until the OPPOSITE fires (blue stays blue
+  until orange; green stays green until red). Matches TradingView visual exactly.
   (stocks only for shorts; crypto is long-only on Alpaca)
 
 Exit rules (TIME-BOUNDED — SIGNAL_WINDOW_SEC freshness required):
-  LONG exit fast:  fresh Trend=SELL, only if unrealized P&L >= +$3
-  LONG exit full:  fresh Conf=SELL + (MR=SELL OR Trend=SELL) — exits regardless of P&L
-  SHORT exit:      fresh Conf=BUY + (MR=BUY OR Trend=BUY) — cover
+  LONG exit fast:  fresh Trend=SELL OR OT=SELL, only if unrealized P&L >= +$3
+  LONG exit full:  fresh Conf=SELL + any fresh (MR/Trend/OT)=SELL — always exits
+  SHORT exit:      fresh Conf=BUY + any fresh (MR/Trend/OT)=BUY — cover
   SL/TP:           risk manager checks every 30s independently
 
 Entry guards:
@@ -47,11 +47,13 @@ class _SymbolState:
         self.conf:  dict = {}
         self.mr:    dict = {}
         self.trend: dict = {}
-        self.macro_bias: str = "up"
+        self.ot:    dict = {}   # Optimised Trend — state-tracked same as Trend
         self._last_entry: float = 0.0
 
     def update(self, model: str, signal: str, strength: str):
-        data = {"signal": signal, "strength": strength, "ts": time.time()}
+        # Normalise OT "up"/"down" to buy/sell so _active() checks are uniform
+        normalised = SIGNAL_BUY if signal in (SIGNAL_BUY, SIGNAL_UP) else SIGNAL_SELL
+        data = {"signal": normalised, "strength": strength, "ts": time.time()}
         if model == MODEL_CONF:
             self.conf = data
         elif model == MODEL_MR:
@@ -59,40 +61,56 @@ class _SymbolState:
         elif model == MODEL_TREND:
             self.trend = data
         elif model == MODEL_OT:
-            self.macro_bias = "up" if signal in (SIGNAL_BUY, SIGNAL_UP) else "down"
+            self.ot = data
+
+    @property
+    def macro_bias(self) -> str:
+        """Derived from OT state for backward-compat display."""
+        return "up" if self._active(self.ot, SIGNAL_BUY) else "down"
 
     def _fresh(self, d: dict, signal_val: str) -> bool:
         """Time-bounded: signal matches AND arrived within SIGNAL_WINDOW_SEC. Used for exits."""
         return bool(d) and d.get("signal") == signal_val and (time.time() - d["ts"]) <= self.window
 
     def _active(self, d: dict, signal_val: str) -> bool:
-        """State-based: signal matches regardless of age. Stays valid until opposite signal fires.
-        Used for entries — IADSS indicators hold their state across bars, not just one event."""
+        """State-based: signal matches regardless of age. Valid until opposite fires.
+        IADSS indicators hold state across bars — blue stays blue until orange fires."""
         return bool(d) and d.get("signal") == signal_val
 
     def has_buy_confluence(self) -> bool:
-        """Entry check (state-based): Conf=BUY + (MR=BUY or Trend=BUY) currently active.
-        No time window — matches what TradingView shows visually (both indicators green)."""
-        return self._active(self.conf, SIGNAL_BUY) and (
-            self._active(self.mr, SIGNAL_BUY) or self._active(self.trend, SIGNAL_BUY)
+        """Entry (state-based): Conf=BUY + any of (MR=BUY, Trend=BUY, OT=BUY) active.
+        Matches TradingView visual — all indicators green = valid entry."""
+        conf_buy = self._active(self.conf, SIGNAL_BUY)
+        secondary = (
+            self._active(self.mr,    SIGNAL_BUY) or
+            self._active(self.trend, SIGNAL_BUY) or
+            self._active(self.ot,    SIGNAL_BUY)
         )
+        return conf_buy and secondary
 
     def has_short_confluence(self) -> bool:
-        """Entry check (state-based): Conf=SELL + (MR=SELL or Trend=SELL) currently active."""
-        return self._active(self.conf, SIGNAL_SELL) and (
-            self._active(self.mr, SIGNAL_SELL) or self._active(self.trend, SIGNAL_SELL)
+        """Entry (state-based): Conf=SELL + any of (MR=SELL, Trend=SELL, OT=SELL) active."""
+        conf_sell = self._active(self.conf, SIGNAL_SELL)
+        secondary = (
+            self._active(self.mr,    SIGNAL_SELL) or
+            self._active(self.trend, SIGNAL_SELL) or
+            self._active(self.ot,    SIGNAL_SELL)
         )
+        return conf_sell and secondary
 
     def has_trend_sell_signal(self) -> bool:
-        """Exit check (time-bounded): fresh Trend=SELL. Profit gate applied at SignalEngine level."""
-        return self._fresh(self.trend, SIGNAL_SELL)
+        """Exit (time-bounded): fresh Trend=SELL OR fresh OT=SELL. Profit gate at SignalEngine."""
+        return self._fresh(self.trend, SIGNAL_SELL) or self._fresh(self.ot, SIGNAL_SELL)
 
     def has_full_exit_signal(self) -> bool:
-        """Exit check (time-bounded): fresh Conf=SELL + (MR=SELL or Trend=SELL) — always exits."""
-        conf_ok  = self._fresh(self.conf,  SIGNAL_SELL)
-        mr_ok    = self._fresh(self.mr,    SIGNAL_SELL)
-        trend_ok = self._fresh(self.trend, SIGNAL_SELL)
-        return conf_ok and (mr_ok or trend_ok)
+        """Exit (time-bounded): fresh Conf=SELL + any fresh secondary SELL — always exits."""
+        conf_ok = self._fresh(self.conf, SIGNAL_SELL)
+        secondary_ok = (
+            self._fresh(self.mr,    SIGNAL_SELL) or
+            self._fresh(self.trend, SIGNAL_SELL) or
+            self._fresh(self.ot,    SIGNAL_SELL)
+        )
+        return conf_ok and secondary_ok
 
     def in_cooldown(self, cooldown: int) -> bool:
         return (time.time() - self._last_entry) < cooldown
@@ -102,6 +120,7 @@ class _SymbolState:
         self.conf  = {}
         self.mr    = {}
         self.trend = {}
+        self.ot    = {}
 
 
 class SignalEngine:
@@ -252,9 +271,12 @@ class SignalEngine:
 
     def _enter_long(self, symbol: str, signal_price: float, state: _SymbolState):
         lot_usd = self.config.LOT_SIZE_USD
+        logger.info(f"{symbol}: attempting LONG buy ${lot_usd:.0f} @ signal ${signal_price:.4f}")
         result = self.broker.buy(symbol, lot_usd)
         if not result:
-            logger.error(f"{symbol}: buy order failed")
+            msg = f"⚠️ {symbol}: LONG buy order FAILED (Alpaca rejected or timed out)"
+            logger.error(msg)
+            self.alerter.send(msg)
             return
 
         _fp = result.get("fill_price")
@@ -277,9 +299,12 @@ class SignalEngine:
 
     def _enter_short(self, symbol: str, signal_price: float, state: _SymbolState):
         lot_usd = self.config.LOT_SIZE_USD
+        logger.info(f"{symbol}: attempting SHORT sell ${lot_usd:.0f} @ signal ${signal_price:.4f}")
         result = self.broker.short(symbol, lot_usd)
         if not result:
-            logger.error(f"{symbol}: short order failed")
+            msg = f"⚠️ {symbol}: SHORT order FAILED (Alpaca rejected or timed out)"
+            logger.error(msg)
+            self.alerter.send(msg)
             return
 
         _fp = result.get("fill_price")
@@ -426,6 +451,7 @@ class SignalEngine:
                     "conf":              fmt(state.conf,  state.window),
                     "mr":                fmt(state.mr,    state.window),
                     "trend":             fmt(state.trend, state.window),
+                    "ot":                fmt(state.ot,    state.window),
                     "macro_bias":        state.macro_bias,
                     "has_long_entry":    state.has_buy_confluence(),
                     "has_short_entry":   state.has_short_confluence(),
