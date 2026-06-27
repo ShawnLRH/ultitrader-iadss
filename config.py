@@ -22,9 +22,15 @@ class Config:
     MAX_DAILY_LOSSES: int = int(os.getenv("MAX_DAILY_LOSSES", "3"))
     DAILY_DRAWDOWN_USD: float = float(os.getenv("DAILY_DRAWDOWN_USD", "300"))
 
-    # IADSS confluence window – signals from any model remain valid for this long.
-    # 1200s (20 min) = 4 bars on a 5-min chart; fresh enough to be meaningful.
-    SIGNAL_WINDOW_SEC: int = int(os.getenv("SIGNAL_WINDOW_SEC", "1200"))
+    # How long a Confluence signal stays fresh after firing.
+    # On 5-min charts, 2700s = 9 bars. Conf is an event (bar-close alignment) so
+    # it expires — a 9-bar-old setup is stale.
+    SIGNAL_WINDOW_SEC: int = int(os.getenv("SIGNAL_WINDOW_SEC", "2700"))
+    # How long an MR signal stays active after firing.
+    # MR fires when the oscillator hits an extreme. On 5-min charts the oscillator
+    # can stay oversold for many bars before Conf aligns — so MR needs a longer
+    # window. Default 14400s = 4 hours = 48 bars.
+    MR_WINDOW_SEC: int = int(os.getenv("MR_WINDOW_SEC", "14400"))
     # Cooldown after entry before re-entering same symbol (seconds)
     ENTRY_COOLDOWN_SEC: int = int(os.getenv("ENTRY_COOLDOWN_SEC", "60"))
     # Allow short selling stocks (not crypto – Alpaca crypto is long-only)

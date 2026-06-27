@@ -3,16 +3,16 @@ IADSS Signal Engine
 -------------------
 Tracks signals from TradingView for three IADSS models per symbol.
 
-Entry rules (HYBRID — Conf+MR time-limited, Trend+OT state-based):
-  LONG:  Conf=BUY (fresh, within SIGNAL_WINDOW_SEC)
-         + any of: MR=BUY (fresh) OR Trend=BUY (active) OR OT=BUY (active)
-  SHORT: Conf=SELL (fresh) + any of: MR=SELL (fresh) OR Trend=SELL (active) OR OT=SELL (active)
+Entry rules (Conf + MR both required — the security filter):
+  LONG:  Conf=BUY fresh within SIGNAL_WINDOW_SEC (default 2700s / 45 min)
+         AND MR=BUY active within MR_WINDOW_SEC (default 14400s / 4 hours)
+  SHORT: Conf=SELL fresh AND MR=SELL within MR_WINDOW_SEC
 
-  Why hybrid:
-    Conf/MR are EVENT signals — a bar-close alignment or oscillator extreme that
-    becomes irrelevant once price has moved past it. Must be recent.
-    Trend/OT are STATE signals — direction holds until the opposite fires (blue
-    stays blue until orange). No expiry; a week-old uptrend is still an uptrend.
+  Why two different windows:
+    Conf is a bar-close event — the alignment at that bar becomes stale quickly (9 bars).
+    MR is an oscillator extreme — the oscillator can STAY oversold for many bars before
+    Conf aligns. 4 hours (48 bars on 5-min) keeps MR relevant across the whole session.
+    Trend/OT are STATE signals — direction holds until opposite fires. Used for exits only.
   (stocks only for shorts; crypto is long-only on Alpaca)
 
 Exit rules (TIME-BOUNDED — SIGNAL_WINDOW_SEC freshness required):
@@ -47,8 +47,9 @@ SIGNAL_DOWN = "down"
 class _SymbolState:
     """Per-symbol signal state."""
 
-    def __init__(self, window: int):
-        self.window = window
+    def __init__(self, window: int, mr_window: int):
+        self.window    = window     # Conf freshness window (short — event signal)
+        self.mr_window = mr_window  # MR freshness window (longer — oscillator stays extreme)
         self.conf:  dict = {}
         self.mr:    dict = {}
         self.trend: dict = {}
@@ -73,36 +74,30 @@ class _SymbolState:
         """Derived from OT state for backward-compat display."""
         return "up" if self._active(self.ot, SIGNAL_BUY) else "down"
 
-    def _fresh(self, d: dict, signal_val: str) -> bool:
-        """Time-bounded: signal matches AND arrived within SIGNAL_WINDOW_SEC. Used for exits."""
-        return bool(d) and d.get("signal") == signal_val and (time.time() - d["ts"]) <= self.window
+    def _fresh(self, d: dict, signal_val: str, window: int = None) -> bool:
+        """Time-bounded: signal matches AND arrived within the given window (default SIGNAL_WINDOW_SEC)."""
+        w = window if window is not None else self.window
+        return bool(d) and d.get("signal") == signal_val and (time.time() - d["ts"]) <= w
 
     def _active(self, d: dict, signal_val: str) -> bool:
         """State-based: signal matches regardless of age. Valid until opposite fires.
-        IADSS indicators hold state across bars — blue stays blue until orange fires."""
+        Used for Trend/OT — direction holds until the opposite signal (orange) fires."""
         return bool(d) and d.get("signal") == signal_val
 
     def has_buy_confluence(self) -> bool:
-        """Entry: Conf=BUY fresh (event signal, expires) + secondary confirmation.
-        MR must also be fresh (oscillator extreme — loses relevance once price recovers).
-        Trend/OT are state-based (direction holds until opposite fires — no expiry)."""
-        conf_fresh = self._fresh(self.conf, SIGNAL_BUY)
-        secondary = (
-            self._fresh(self.mr,     SIGNAL_BUY) or   # MR: time-limited
-            self._active(self.trend, SIGNAL_BUY) or   # Trend: state, blue until orange
-            self._active(self.ot,    SIGNAL_BUY)       # OT: state, blue until orange
-        )
-        return conf_fresh and secondary
+        """Entry: BOTH Conf AND MR required — this is the security filter.
+        Conf=BUY fresh within SIGNAL_WINDOW_SEC (short — bar-close event, expires fast).
+        MR=BUY active within MR_WINDOW_SEC (longer — oscillator can stay extreme many bars).
+        Trend/OT not required for entry; they are exit signals only."""
+        conf_fresh = self._fresh(self.conf, SIGNAL_BUY)                   # short window
+        mr_active  = self._fresh(self.mr,   SIGNAL_BUY, self.mr_window)   # long window
+        return conf_fresh and mr_active
 
     def has_short_confluence(self) -> bool:
-        """Entry: Conf=SELL fresh + secondary. MR fresh OR Trend/OT active in SELL state."""
+        """Entry SHORT: Conf=SELL fresh (short window) AND MR=SELL within MR_WINDOW_SEC."""
         conf_fresh = self._fresh(self.conf, SIGNAL_SELL)
-        secondary = (
-            self._fresh(self.mr,     SIGNAL_SELL) or
-            self._active(self.trend, SIGNAL_SELL) or
-            self._active(self.ot,    SIGNAL_SELL)
-        )
-        return conf_fresh and secondary
+        mr_active  = self._fresh(self.mr,   SIGNAL_SELL, self.mr_window)
+        return conf_fresh and mr_active
 
     def has_trend_sell_signal(self) -> bool:
         """Exit (time-bounded): fresh Trend=SELL OR fresh OT=SELL. Profit gate at SignalEngine."""
@@ -138,7 +133,8 @@ class SignalEngine:
         self.trade_logger = trade_logger
         self._lock  = Lock()
         self._states: dict[str, _SymbolState] = {
-            sym: _SymbolState(config.SIGNAL_WINDOW_SEC) for sym in config.ALL_SYMBOLS
+            sym: _SymbolState(config.SIGNAL_WINDOW_SEC, config.MR_WINDOW_SEC)
+            for sym in config.ALL_SYMBOLS
         }
         self._webhook_log: deque = deque(maxlen=200)
 
@@ -438,24 +434,26 @@ class SignalEngine:
     def get_signal_state(self) -> dict:
         now = time.time()
 
-        def fmt(d, window):
+        def fmt(d, window, mr_window=None):
             if not d:
-                return {"signal": None, "age_sec": None, "fresh": False, "active": False, "strength": None}
+                return {"signal": None, "age_sec": None, "fresh": False, "strength": None}
             age = now - d["ts"]
-            return {
+            result = {
                 "signal":   d["signal"],
                 "age_sec":  round(age),
-                "fresh":    age <= window,   # within SIGNAL_WINDOW_SEC (used for exits)
-                "active":   True,            # state-based: valid until opposite fires (used for entries)
+                "fresh":    age <= window,
                 "strength": d.get("strength"),
             }
+            if mr_window is not None:
+                result["mr_active"] = age <= mr_window
+            return result
 
         result = {}
         with self._lock:
             for sym, state in self._states.items():
                 result[sym] = {
                     "conf":              fmt(state.conf,  state.window),
-                    "mr":                fmt(state.mr,    state.window),
+                    "mr":                fmt(state.mr,    state.window, state.mr_window),
                     "trend":             fmt(state.trend, state.window),
                     "ot":                fmt(state.ot,    state.window),
                     "macro_bias":        state.macro_bias,
