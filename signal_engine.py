@@ -3,11 +3,16 @@ IADSS Signal Engine
 -------------------
 Tracks signals from TradingView for three IADSS models per symbol.
 
-Entry rules (STATE-BASED — no time window):
-  LONG:  Conf=BUY + any of (MR=BUY, Trend=BUY, OT=BUY) currently active
-  SHORT: Conf=SELL + any of (MR=SELL, Trend=SELL, OT=SELL) currently active
-  All 4 signals hold their state until the OPPOSITE fires (blue stays blue
-  until orange; green stays green until red). Matches TradingView visual exactly.
+Entry rules (HYBRID — Conf+MR time-limited, Trend+OT state-based):
+  LONG:  Conf=BUY (fresh, within SIGNAL_WINDOW_SEC)
+         + any of: MR=BUY (fresh) OR Trend=BUY (active) OR OT=BUY (active)
+  SHORT: Conf=SELL (fresh) + any of: MR=SELL (fresh) OR Trend=SELL (active) OR OT=SELL (active)
+
+  Why hybrid:
+    Conf/MR are EVENT signals — a bar-close alignment or oscillator extreme that
+    becomes irrelevant once price has moved past it. Must be recent.
+    Trend/OT are STATE signals — direction holds until the opposite fires (blue
+    stays blue until orange). No expiry; a week-old uptrend is still an uptrend.
   (stocks only for shorts; crypto is long-only on Alpaca)
 
 Exit rules (TIME-BOUNDED — SIGNAL_WINDOW_SEC freshness required):
@@ -78,25 +83,26 @@ class _SymbolState:
         return bool(d) and d.get("signal") == signal_val
 
     def has_buy_confluence(self) -> bool:
-        """Entry (state-based): Conf=BUY + any of (MR=BUY, Trend=BUY, OT=BUY) active.
-        Matches TradingView visual — all indicators green = valid entry."""
-        conf_buy = self._active(self.conf, SIGNAL_BUY)
+        """Entry: Conf=BUY fresh (event signal, expires) + secondary confirmation.
+        MR must also be fresh (oscillator extreme — loses relevance once price recovers).
+        Trend/OT are state-based (direction holds until opposite fires — no expiry)."""
+        conf_fresh = self._fresh(self.conf, SIGNAL_BUY)
         secondary = (
-            self._active(self.mr,    SIGNAL_BUY) or
-            self._active(self.trend, SIGNAL_BUY) or
-            self._active(self.ot,    SIGNAL_BUY)
+            self._fresh(self.mr,     SIGNAL_BUY) or   # MR: time-limited
+            self._active(self.trend, SIGNAL_BUY) or   # Trend: state, blue until orange
+            self._active(self.ot,    SIGNAL_BUY)       # OT: state, blue until orange
         )
-        return conf_buy and secondary
+        return conf_fresh and secondary
 
     def has_short_confluence(self) -> bool:
-        """Entry (state-based): Conf=SELL + any of (MR=SELL, Trend=SELL, OT=SELL) active."""
-        conf_sell = self._active(self.conf, SIGNAL_SELL)
+        """Entry: Conf=SELL fresh + secondary. MR fresh OR Trend/OT active in SELL state."""
+        conf_fresh = self._fresh(self.conf, SIGNAL_SELL)
         secondary = (
-            self._active(self.mr,    SIGNAL_SELL) or
+            self._fresh(self.mr,     SIGNAL_SELL) or
             self._active(self.trend, SIGNAL_SELL) or
             self._active(self.ot,    SIGNAL_SELL)
         )
-        return conf_sell and secondary
+        return conf_fresh and secondary
 
     def has_trend_sell_signal(self) -> bool:
         """Exit (time-bounded): fresh Trend=SELL OR fresh OT=SELL. Profit gate at SignalEngine."""
