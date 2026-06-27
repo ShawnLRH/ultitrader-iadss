@@ -3,15 +3,18 @@ IADSS Signal Engine
 -------------------
 Tracks signals from TradingView for three IADSS models per symbol.
 
-Entry rules:
-  LONG:  Confluence=BUY required + (MR=BUY OR Trend=BUY) as confirmation
-  SHORT: Confluence=SELL required + (MR=SELL OR Trend=SELL) as confirmation
-  Conf is always required; MR or Trend provides the second confirmation.
+Entry rules (STATE-BASED — no time window):
+  LONG:  Conf=BUY state + (MR=BUY OR Trend=BUY) state currently active
+  SHORT: Conf=SELL state + (MR=SELL OR Trend=SELL) state currently active
+  Signals stay active until the OPPOSITE signal fires — matching what TradingView
+  shows visually. Both indicators "green" on TV = entry valid here.
   (stocks only for shorts; crypto is long-only on Alpaca)
 
-Exit rules:
-  LONG exit:  Trend=SELL alone (profit-gated) OR (Conf=SELL + MR=SELL) OR SL/TP
-  SHORT exit: Conf=BUY + (MR=BUY OR Trend=BUY) OR SL/TP
+Exit rules (TIME-BOUNDED — SIGNAL_WINDOW_SEC freshness required):
+  LONG exit fast:  fresh Trend=SELL, only if unrealized P&L >= +$3
+  LONG exit full:  fresh Conf=SELL + (MR=SELL OR Trend=SELL) — exits regardless of P&L
+  SHORT exit:      fresh Conf=BUY + (MR=BUY OR Trend=BUY) — cover
+  SL/TP:           risk manager checks every 30s independently
 
 Entry guards:
   - Stock entries blocked within OPEN_BUFFER_SEC of 9:30 AM ET (default 30 min)
@@ -59,28 +62,33 @@ class _SymbolState:
             self.macro_bias = "up" if signal in (SIGNAL_BUY, SIGNAL_UP) else "down"
 
     def _fresh(self, d: dict, signal_val: str) -> bool:
+        """Time-bounded: signal matches AND arrived within SIGNAL_WINDOW_SEC. Used for exits."""
         return bool(d) and d.get("signal") == signal_val and (time.time() - d["ts"]) <= self.window
 
+    def _active(self, d: dict, signal_val: str) -> bool:
+        """State-based: signal matches regardless of age. Stays valid until opposite signal fires.
+        Used for entries — IADSS indicators hold their state across bars, not just one event."""
+        return bool(d) and d.get("signal") == signal_val
+
     def has_buy_confluence(self) -> bool:
-        """Conf=BUY required + (MR=BUY OR Trend=BUY) as confirmation."""
-        conf_ok  = self._fresh(self.conf,  SIGNAL_BUY)
-        mr_ok    = self._fresh(self.mr,    SIGNAL_BUY)
-        trend_ok = self._fresh(self.trend, SIGNAL_BUY)
-        return conf_ok and (mr_ok or trend_ok)
+        """Entry check (state-based): Conf=BUY + (MR=BUY or Trend=BUY) currently active.
+        No time window — matches what TradingView shows visually (both indicators green)."""
+        return self._active(self.conf, SIGNAL_BUY) and (
+            self._active(self.mr, SIGNAL_BUY) or self._active(self.trend, SIGNAL_BUY)
+        )
 
     def has_short_confluence(self) -> bool:
-        """Conf=SELL required + (MR=SELL OR Trend=SELL) as confirmation."""
-        conf_ok  = self._fresh(self.conf,  SIGNAL_SELL)
-        mr_ok    = self._fresh(self.mr,    SIGNAL_SELL)
-        trend_ok = self._fresh(self.trend, SIGNAL_SELL)
-        return conf_ok and (mr_ok or trend_ok)
+        """Entry check (state-based): Conf=SELL + (MR=SELL or Trend=SELL) currently active."""
+        return self._active(self.conf, SIGNAL_SELL) and (
+            self._active(self.mr, SIGNAL_SELL) or self._active(self.trend, SIGNAL_SELL)
+        )
 
     def has_trend_sell_signal(self) -> bool:
-        """Trend flipped to SELL (freshness only — profit check happens at SignalEngine level)."""
+        """Exit check (time-bounded): fresh Trend=SELL. Profit gate applied at SignalEngine level."""
         return self._fresh(self.trend, SIGNAL_SELL)
 
     def has_full_exit_signal(self) -> bool:
-        """Conf=SELL + (MR=SELL OR Trend=SELL) both fresh — exits regardless of P&L."""
+        """Exit check (time-bounded): fresh Conf=SELL + (MR=SELL or Trend=SELL) — always exits."""
         conf_ok  = self._fresh(self.conf,  SIGNAL_SELL)
         mr_ok    = self._fresh(self.mr,    SIGNAL_SELL)
         trend_ok = self._fresh(self.trend, SIGNAL_SELL)
@@ -401,12 +409,13 @@ class SignalEngine:
 
         def fmt(d, window):
             if not d:
-                return {"signal": None, "age_sec": None, "fresh": False, "strength": None}
+                return {"signal": None, "age_sec": None, "fresh": False, "active": False, "strength": None}
             age = now - d["ts"]
             return {
                 "signal":   d["signal"],
                 "age_sec":  round(age),
-                "fresh":    age <= window,
+                "fresh":    age <= window,   # within SIGNAL_WINDOW_SEC (used for exits)
+                "active":   True,            # state-based: valid until opposite fires (used for entries)
                 "strength": d.get("strength"),
             }
 
