@@ -98,6 +98,8 @@ def main():
             logger.info(f"Add to .env → TELEGRAM_CHAT_ID={chat_id}")
 
     trade_logger = TradeLogger()
+    n_synced = trade_logger.sync_from_alpaca(broker)
+    logger.info(f"Startup: synced {n_synced} historical trades from Alpaca")
     position_mgr = PositionManager(cfg)
     _reconcile_positions(broker, position_mgr, cfg, alerter)
     signal_engine = SignalEngine(cfg, position_mgr, broker, alerter, trade_logger)

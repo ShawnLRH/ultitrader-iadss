@@ -186,6 +186,39 @@ class AlpacaBroker:
             logger.error(f"get_account: {e}")
             return {}
 
+    def get_closed_orders(self, days: int = 90) -> list:
+        """Return all filled orders from the last N days, sorted oldest-first."""
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        from datetime import datetime, timezone, timedelta
+        try:
+            since = datetime.now(timezone.utc) - timedelta(days=days)
+            req = GetOrdersRequest(
+                status=QueryOrderStatus.CLOSED,
+                after=since,
+                direction="asc",
+                limit=500,
+            )
+            orders = self.trading.get_orders(filter=req)
+            result = []
+            for o in orders:
+                fqty  = float(o.filled_qty or 0)
+                fprice = float(o.filled_avg_price or 0)
+                if fqty <= 0 or fprice <= 0 or not o.filled_at:
+                    continue
+                result.append({
+                    "id":                str(o.id),
+                    "symbol":            str(o.symbol),
+                    "side":              o.side.value if hasattr(o.side, "value") else str(o.side),
+                    "filled_qty":        fqty,
+                    "filled_avg_price":  fprice,
+                    "filled_at":         o.filled_at.isoformat(),
+                })
+            return result
+        except Exception as e:
+            logger.error(f"get_closed_orders: {e}")
+            return []
+
     def get_positions(self) -> list:
         """Return all open Alpaca positions as plain dicts."""
         try:
