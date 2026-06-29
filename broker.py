@@ -163,9 +163,14 @@ class AlpacaBroker:
             return None
 
     def close_position(self, symbol: str) -> bool:
-        """Close the entire Alpaca position for a symbol."""
+        """Close the entire Alpaca position for a symbol.
+
+        Alpaca stores crypto positions without the slash (BTCUSD not BTC/USD),
+        so we strip it before hitting the positions API.
+        """
+        alpaca_sym = symbol.replace("/", "")
         try:
-            self.trading.close_position(symbol)
+            self.trading.close_position(alpaca_sym)
             logger.info(f"CLOSE all {symbol}")
             return True
         except Exception as e:
