@@ -42,9 +42,10 @@ def _reconcile_positions(broker, position_mgr, cfg, alerter):
 
     recovered = []
     for pos in open_positions:
-        symbol = pos["symbol"]
+        # Alpaca positions use compact crypto format (BTCUSD); normalize to our format (BTC/USD)
+        symbol = cfg.normalize_symbol(pos["symbol"])
         if symbol not in cfg.ALL_SYMBOLS:
-            logger.info(f"Reconcile: skipping {symbol} (not in universe)")
+            logger.info(f"Reconcile: skipping {pos['symbol']} (not in universe)")
             continue
         direction = "long" if "long" in pos["side"].lower() else "short"
         lot = position_mgr.add_lot(

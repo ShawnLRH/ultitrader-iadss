@@ -108,25 +108,39 @@ class TradeLogger:
         self.filepath = Path(filepath)
         self._lock = Lock()
         if not self.filepath.exists():
-            with open(self.filepath, "w", newline="") as f:
-                csv.DictWriter(f, fieldnames=FIELDS).writeheader()
+            if SEED_FILE.exists():
+                import shutil
+                shutil.copy(SEED_FILE, self.filepath)
+                logger.info(f"Seeded {self.filepath} from {SEED_FILE}")
+            else:
+                with open(self.filepath, "w", newline="") as f:
+                    csv.DictWriter(f, fieldnames=FIELDS).writeheader()
 
     def sync_from_alpaca(self, broker) -> int:
         """Pull Alpaca order history, reconstruct trades, merge into trades.csv.
 
+        Only reconstructs trades for symbols in our trading universe so other
+        bots sharing the same paper account don't pollute our history.
         ALP- rows are replaced on each call (rebuilt fresh from Alpaca).
         Bot-generated LOT- rows are preserved unchanged.
+        Falls back to trades_seed.csv if Alpaca returns no usable trades.
         Returns number of Alpaca-history trades written.
         """
         orders = broker.get_closed_orders(days=90)
-        if not orders:
-            logger.info("sync_from_alpaca: no closed orders from Alpaca")
-            return 0
+        universe = set(broker.config.ALL_SYMBOLS)
+        our_orders = [o for o in orders if o["symbol"] in universe]
+        logger.info(f"sync_from_alpaca: {len(orders)} total orders, {len(our_orders)} in our universe")
 
-        alpaca_trades = _reconstruct_trades_from_orders(orders)
+        alpaca_trades = _reconstruct_trades_from_orders(our_orders) if our_orders else []
 
         existing = self.get_all_trades()
         bot_rows = [t for t in existing if not t.get("lot_id", "").startswith("ALP-")]
+
+        if not alpaca_trades and not bot_rows and SEED_FILE.exists():
+            import shutil
+            shutil.copy(SEED_FILE, self.filepath)
+            logger.info(f"sync_from_alpaca: no live trades found, seeded from {SEED_FILE}")
+            return 0
 
         merged = bot_rows + alpaca_trades
         merged.sort(key=lambda x: x.get("exit_time", ""))
