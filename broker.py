@@ -186,6 +186,24 @@ class AlpacaBroker:
             logger.error(f"get_account: {e}")
             return {}
 
+    def get_positions(self) -> list:
+        """Return all open Alpaca positions as plain dicts."""
+        try:
+            positions = self.trading.get_all_positions()
+            return [
+                {
+                    "symbol":          str(p.symbol),
+                    "qty":             float(p.qty),
+                    "side":            p.side.value if hasattr(p.side, "value") else str(p.side),
+                    "avg_entry_price": float(p.avg_entry_price),
+                    "unrealized_pl":   float(p.unrealized_pl),
+                }
+                for p in positions
+            ]
+        except Exception as e:
+            logger.error(f"get_positions: {e}")
+            return []
+
     def is_market_open(self) -> bool:
         try:
             return self.trading.get_clock().is_open

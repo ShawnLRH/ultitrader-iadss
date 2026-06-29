@@ -28,6 +28,49 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _reconcile_positions(broker, position_mgr, cfg, alerter):
+    """Re-sync open Alpaca positions into the local position manager on startup.
+
+    Needed because position_mgr state is in-memory and lost on Railway restarts.
+    Each Alpaca position (which may combine multiple lots) is reconstructed as
+    one lot using avg_entry_price so SL/TP monitoring resumes immediately.
+    """
+    open_positions = broker.get_positions()
+    if not open_positions:
+        logger.info("Reconcile: no open Alpaca positions.")
+        return
+
+    recovered = []
+    for pos in open_positions:
+        symbol = pos["symbol"]
+        if symbol not in cfg.ALL_SYMBOLS:
+            logger.info(f"Reconcile: skipping {symbol} (not in universe)")
+            continue
+        direction = "long" if "long" in pos["side"].lower() else "short"
+        lot = position_mgr.add_lot(
+            symbol=symbol,
+            qty=pos["qty"],
+            fill_price=pos["avg_entry_price"],
+            direction=direction,
+        )
+        line = (
+            f"  {symbol} {direction} qty={pos['qty']:.4f} "
+            f"@ ${pos['avg_entry_price']:.4f} "
+            f"(UPL ${pos['unrealized_pl']:+.2f})"
+        )
+        recovered.append(line)
+        logger.info(f"Reconciled {lot.lot_id} {symbol} {direction} from Alpaca")
+
+    if recovered:
+        msg = (
+            "🔄 <b>Restart reconciliation — open positions restored</b>\n"
+            + "\n".join(recovered)
+            + "\n\nSL/TP monitoring resumed."
+        )
+        alerter.send(msg)
+        logger.info(f"Reconciled {len(recovered)} position(s) from Alpaca.")
+
+
 def main():
     cfg = Config()
 
@@ -56,6 +99,7 @@ def main():
 
     trade_logger = TradeLogger()
     position_mgr = PositionManager(cfg)
+    _reconcile_positions(broker, position_mgr, cfg, alerter)
     signal_engine = SignalEngine(cfg, position_mgr, broker, alerter, trade_logger)
     risk_mgr = RiskManager(cfg, broker, position_mgr, signal_engine, alerter)
 
