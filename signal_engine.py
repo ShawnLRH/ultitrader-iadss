@@ -99,6 +99,14 @@ class _SymbolState:
         mr_active  = self._fresh(self.mr,   SIGNAL_SELL, self.mr_window)
         return conf_fresh and mr_active
 
+    def is_macro_bearish(self) -> bool:
+        """Trend or OT is in active SELL state (regardless of age). Blocks long entries."""
+        return self._active(self.trend, SIGNAL_SELL) or self._active(self.ot, SIGNAL_SELL)
+
+    def is_macro_bullish(self) -> bool:
+        """Trend or OT is in active BUY state (regardless of age). Blocks short entries."""
+        return self._active(self.trend, SIGNAL_BUY) or self._active(self.ot, SIGNAL_BUY)
+
     def has_trend_sell_signal(self) -> bool:
         """Exit (time-bounded): fresh Trend=SELL OR fresh OT=SELL. Profit gate at SignalEngine."""
         return self._fresh(self.trend, SIGNAL_SELL) or self._fresh(self.ot, SIGNAL_SELL)
@@ -118,10 +126,10 @@ class _SymbolState:
 
     def mark_entry(self):
         self._last_entry = time.time()
-        self.conf  = {}
-        self.mr    = {}
-        self.trend = {}
-        self.ot    = {}
+        self.conf = {}
+        self.mr   = {}
+        # Trend/OT are directional STATE signals — they persist until the opposite fires.
+        # Clearing them on entry loses macro context and delays trend-based exits.
 
 
 class SignalEngine:
@@ -238,6 +246,9 @@ class SignalEngine:
     def _can_enter_long(self, symbol: str, state: _SymbolState) -> bool:
         if not state.has_buy_confluence():
             return False
+        if state.is_macro_bearish():
+            logger.info(f"{symbol}: Trend/OT bearish — blocking long entry")
+            return False
         if self.position_mgr.daily_loss_limit_reached():
             logger.warning(f"{symbol}: daily loss limit reached")
             return False
@@ -255,6 +266,9 @@ class SignalEngine:
 
     def _can_enter_short(self, symbol: str, state: _SymbolState) -> bool:
         if not state.has_short_confluence():
+            return False
+        if state.is_macro_bullish():
+            logger.info(f"{symbol}: Trend/OT bullish — blocking short entry")
             return False
         if self.position_mgr.daily_loss_limit_reached():
             return False

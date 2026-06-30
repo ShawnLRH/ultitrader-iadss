@@ -1,4 +1,5 @@
 """Alpaca broker wrapper – handles both stocks and crypto."""
+import math
 import time
 import logging
 from typing import Optional
@@ -84,12 +85,15 @@ class AlpacaBroker:
             return None
 
     def short(self, symbol: str, notional_usd: float) -> Optional[dict]:
-        """Open a short (sell short) by notional USD. Stocks only."""
+        """Open a short (sell short) by notional USD. Stocks only, whole shares — Alpaca rejects fractional shorts."""
         try:
             price = self.get_price(symbol)
             if not price:
                 return None
-            qty = round(notional_usd / price, 6)
+            qty = math.floor(notional_usd / price)
+            if qty < 1:
+                logger.warning(f"short {symbol}: notional ${notional_usd:.2f} @ ${price:.4f} → qty={qty} too small, skipping")
+                return None
             order = self.trading.submit_order(
                 MarketOrderRequest(
                     symbol=symbol,
