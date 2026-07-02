@@ -92,8 +92,15 @@ class AlpacaBroker:
                 return None
             qty = math.floor(notional_usd / price)
             if qty < 1:
-                logger.warning(f"short {symbol}: notional ${notional_usd:.2f} @ ${price:.4f} → qty={qty} too small, skipping")
-                return None
+                # Whole-share minimum means a stock priced above the lot notional
+                # would otherwise always floor to 0 and silently no-op. Allow 1
+                # share as long as it doesn't blow the lot budget by more than 2x;
+                # beyond that the position is too oversized relative to intended risk.
+                if price <= notional_usd * 2:
+                    qty = 1
+                else:
+                    logger.warning(f"short {symbol}: notional ${notional_usd:.2f} @ ${price:.4f} → price too far above lot budget, skipping")
+                    return None
             order = self.trading.submit_order(
                 MarketOrderRequest(
                     symbol=symbol,
