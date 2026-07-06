@@ -101,24 +101,29 @@ class AlpacaBroker:
                 else:
                     logger.warning(f"short {symbol}: notional ${notional_usd:.2f} @ ${price:.4f} → price too far above lot budget, skipping")
                     return None
-            order = self.trading.submit_order(
-                MarketOrderRequest(
-                    symbol=symbol,
-                    qty=qty,
-                    side=OrderSide.SELL,
-                    time_in_force=TimeInForce.DAY,
-                )
-            )
+            # alpaca-py's MarketOrderRequest coerces qty to a Python float, so the
+            # wire payload becomes {"qty": 1.0} — Alpaca's live short-sale validator
+            # flags the decimal-formatted qty as a fractional order and rejects it
+            # with "fractional orders cannot be sold short" even though the value is
+            # a whole share. Post the raw dict instead so int qty serializes as "1".
+            response = self.trading.post("/orders", {
+                "symbol": symbol,
+                "qty": int(qty),
+                "side": "sell",
+                "type": "market",
+                "time_in_force": "day",
+            })
+            order_id = response["id"]
             fill_price, fill_qty = 0.0, 0.0
             for _ in range(10):
                 time.sleep(0.5)
-                filled = self.trading.get_order_by_id(str(order.id))
+                filled = self.trading.get_order_by_id(order_id)
                 fill_price = float(filled.filled_avg_price or 0)
                 fill_qty   = float(filled.filled_qty or 0)
                 if fill_price > 0:
                     break
             logger.info(f"SHORT {symbol} ${notional_usd:.2f} → qty={fill_qty:.6f} @ ${fill_price:.4f}")
-            return {"order_id": str(order.id), "symbol": symbol, "fill_price": fill_price, "fill_qty": fill_qty}
+            return {"order_id": order_id, "symbol": symbol, "fill_price": fill_price, "fill_qty": fill_qty}
         except Exception as e:
             logger.error(f"short {symbol}: {e}")
             return None
