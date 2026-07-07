@@ -47,6 +47,10 @@ def _reconcile_positions(broker, position_mgr, cfg, alerter):
         if symbol not in cfg.ALL_SYMBOLS:
             logger.info(f"Reconcile: skipping {pos['symbol']} (not in universe)")
             continue
+        notional = pos["qty"] * pos["avg_entry_price"]
+        if notional < 1.0:
+            logger.info(f"Reconcile: skipping {pos['symbol']} (dust position, ${notional:.6f})")
+            continue
         direction = "long" if "long" in pos["side"].lower() else "short"
         lot = position_mgr.add_lot(
             symbol=symbol,
