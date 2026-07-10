@@ -2,11 +2,15 @@
 import os
 import glob
 import logging
+import threading
 from flask import Flask, request, jsonify, render_template, send_file
 
 import macro_factors
 
 logger = logging.getLogger(__name__)
+
+_news_job_lock = threading.Lock()
+_news_job_running = False
 
 
 def create_app(config, signal_engine, alerter, trade_logger=None):
@@ -132,17 +136,26 @@ def create_app(config, signal_engine, alerter, trade_logger=None):
 
     @app.route("/admin/run-news-job", methods=["POST"])
     def admin_run_news_job():
-        """Manually trigger the daily news job (testing — doesn't wait for the 8:30am schedule)."""
+        """Manually trigger the daily news job (testing — doesn't wait for the 8:30am schedule).
+
+        Runs in a background thread and returns immediately — the full pipeline
+        (RSS fetch + two paced Groq calls + PDF build) takes minutes, well past
+        typical platform HTTP timeouts if run inline. Poll /api/newsletter for
+        the result once it completes.
+        """
         secret = request.headers.get("X-Secret", "") or request.args.get("secret", "")
         if config.WEBHOOK_SECRET and secret != config.WEBHOOK_SECRET:
             return jsonify({"error": "unauthorized"}), 401
-        from news_analyst import run_daily_news_job
-        try:
-            factors = run_daily_news_job(config, alerter)
-            return jsonify({"status": "ok", "factors": factors})
-        except Exception as e:
-            logger.error(f"admin_run_news_job failed: {e}")
-            return jsonify({"error": str(e)}), 500
+
+        def _run():
+            from news_analyst import run_daily_news_job
+            try:
+                run_daily_news_job(config, alerter)
+            except Exception as e:
+                logger.error(f"admin_run_news_job (background) failed: {e}")
+
+        threading.Thread(target=_run, daemon=True, name="ManualNewsJob").start()
+        return jsonify({"status": "started", "note": "poll /api/newsletter for the result"}), 202
 
     @app.route("/admin/patch-trade", methods=["POST"])
     def admin_patch_trade():

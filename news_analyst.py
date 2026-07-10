@@ -19,6 +19,7 @@ import json
 import glob
 import logging
 import datetime
+import threading
 
 import requests
 from reportlab.lib.pagesizes import LETTER
@@ -288,8 +289,27 @@ def _clear_old_newsletters(directory: str):
             logger.warning(f"news_analyst: could not remove {old}: {e}")
 
 
+_job_lock = threading.Lock()
+
+
 def run_daily_news_job(cfg, alerter=None) -> dict:
-    """Full pipeline: fetch -> analyze -> PDF -> factors.json -> alert. Returns the factors dict."""
+    """Full pipeline: fetch -> analyze -> PDF -> factors.json -> alert. Returns the factors dict.
+
+    Guarded by a process-wide lock — the scheduled daily run and a manual
+    /admin/run-news-job trigger could otherwise overlap and both hit Groq at
+    once, defeating the 65s TPM pacing between calls.
+    """
+    if not _job_lock.acquire(blocking=False):
+        logger.warning("run_daily_news_job: a run is already in progress — skipping this call")
+        return {"status": "already_running"}
+
+    try:
+        return _run_daily_news_job(cfg, alerter)
+    finally:
+        _job_lock.release()
+
+
+def _run_daily_news_job(cfg, alerter=None) -> dict:
     os.makedirs(cfg.NEWSLETTER_DIR, exist_ok=True)
     date_str = datetime.date.today().isoformat()
 
