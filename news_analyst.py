@@ -221,42 +221,86 @@ TODAY'S AGGREGATED HEADLINES:
     return result
 
 
+# Mirrors FACTOR_META.invert in templates/dashboard.html — which factors read
+# "high = bad" (red at the high end) vs "high = good" (green at the high end).
+FACTOR_INVERT = {
+    "bull_factor": False,
+    "instability_factor": True,
+    "geopolitical_risk_factor": True,
+    "economic_momentum_factor": False,
+    "fed_policy_lean": True,
+}
+
+
+def _factor_color(value: int, invert: bool):
+    v = (100 - value) if invert else value
+    if v >= 66:
+        return colors.HexColor("#22a06b")   # green
+    if v >= 34:
+        return colors.HexColor("#c98a12")   # amber
+    return colors.HexColor("#d64545")       # red
+
+
 def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str):
     """Render the newsletter + factor summary to a multi-page PDF via ReportLab."""
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("TitleBig", parent=styles["Title"], fontSize=22, spaceAfter=4)
-    sub_style   = ParagraphStyle("Sub", parent=styles["Normal"], fontSize=11, textColor=colors.grey, spaceAfter=18)
+    sub_style   = ParagraphStyle("Sub", parent=styles["Normal"], fontSize=11, textColor=colors.grey, spaceAfter=22)
     h2_style    = ParagraphStyle("H2", parent=styles["Heading2"], spaceBefore=16, spaceAfter=8, textColor=colors.HexColor("#1e3a5f"))
     body_style  = ParagraphStyle("Body", parent=styles["Normal"], fontSize=11.5, leading=18, spaceAfter=13)
+    factor_label_style = ParagraphStyle(
+        "FactorLabel", parent=styles["Normal"], fontSize=9.5, fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#475569"), spaceAfter=0,
+    )
+    rationale_style = ParagraphStyle(
+        "Rationale", parent=styles["Normal"], fontSize=9, leading=13,
+        textColor=colors.HexColor("#64748b"), spaceAfter=16,
+    )
 
     doc = SimpleDocTemplate(
         path, pagesize=LETTER,
         topMargin=0.75 * inch, bottomMargin=0.75 * inch,
         leftMargin=0.85 * inch, rightMargin=0.85 * inch,
     )
+    content_width = LETTER[0] - doc.leftMargin - doc.rightMargin
+    bar_height = 0.16 * inch
 
     story = []
     story.append(Paragraph("IADSS UltiTrader — Daily Market Intelligence", title_style))
     story.append(Paragraph(f"{date_str}  ·  AI-generated briefing (Groq {os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')})", sub_style))
 
-    # Factor summary table
-    table_data = [["Factor", "Score (1-100)", "Rationale"]]
+    # Factor summary — dashboard-style bars instead of a plain table
     rationale = factors.get("rationale", {})
     for k in FACTOR_KEYS:
-        table_data.append([FACTOR_LABELS[k], str(factors.get(k, "—")), rationale.get(k, "")])
-    tbl = Table(table_data, colWidths=[2.1 * inch, 0.9 * inch, 3.2 * inch])
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f6fa")]),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
-    story.append(tbl)
+        value = max(1, min(100, int(factors.get(k, 50))))
+        color = _factor_color(value, FACTOR_INVERT[k])
+
+        header = Table(
+            [[Paragraph(FACTOR_LABELS[k], factor_label_style),
+              Paragraph(str(value), ParagraphStyle("FactorVal", parent=factor_label_style, fontSize=12, textColor=color))]],
+            colWidths=[content_width - 0.6 * inch, 0.6 * inch],
+        )
+        header.setStyle(TableStyle([
+            ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+            ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(header)
+
+        filled_w = max(0.03 * inch, content_width * value / 100.0)
+        track_w = max(0.03 * inch, content_width - filled_w)
+        bar = Table([["", ""]], colWidths=[filled_w, track_w], rowHeights=[bar_height])
+        bar.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, 0), color),
+            ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#e2e8f0")),
+            ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(bar)
+        story.append(Spacer(1, 5))
+        story.append(Paragraph(rationale.get(k, ""), rationale_style))
+
     story.append(PageBreak())
 
     # Newsletter body — split on "## Heading" lines into styled sections
