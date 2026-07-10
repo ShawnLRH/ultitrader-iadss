@@ -119,6 +119,17 @@
     }
     .limit-warn { color: #f87171; font-weight: 700; }
 
+    /* ── News factors ── */
+    .factor-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 4px; }
+    .factor-card { background: #0d1526; border: 1px solid #1e2d45; border-radius: 10px; padding: 12px 14px; }
+    .factor-label { font-size: 0.64rem; color: #64748b; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; min-height: 28px; }
+    .factor-value { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; }
+    .factor-track { background: #1e2d45; border-radius: 6px; height: 6px; overflow: hidden; margin-bottom: 8px; }
+    .factor-fill { height: 100%; border-radius: 6px; }
+    .factor-rationale { font-size: 0.66rem; color: #94a3b8; line-height: 1.4; }
+    .news-meta { font-size: 0.72rem; color: #64748b; margin-top: 12px; }
+    @media (max-width: 1100px) { .factor-grid { grid-template-columns: repeat(2, 1fr); } }
+
     /* ── Signal state ── */
     .sig-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
     .sig-val  { font-size: 0.78rem; font-weight: 700; }
@@ -258,6 +269,15 @@
     <div id="logWrap"><div class="empty">No webhook hits received yet</div></div>
   </div>
 
+  <!-- Daily Market Intelligence -->
+  <div class="table-card">
+    <div class="table-title" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Daily Market Intelligence — AI news briefing</span>
+      <a id="newsletterDownload" href="/newsletter/download" style="display:none;font-size:0.72rem;color:#60a5fa;text-decoration:none;border:1px solid #1e2d45;padding:5px 12px;border-radius:8px;">⬇ Download PDF</a>
+    </div>
+    <div id="newsWrap"><div class="empty">No newsletter generated yet — first run is at 8:30am ET</div></div>
+  </div>
+
 </div><!-- /container -->
 
 <script>
@@ -305,15 +325,16 @@
   /* ── main fetch ── */
   async function refresh() {
     try {
-      const [sRes, tRes, pRes, sigRes, logRes] = await Promise.all([
+      const [sRes, tRes, pRes, sigRes, logRes, newsRes] = await Promise.all([
         fetch('/api/stats'), fetch('/api/trades'), fetch('/status'),
-        fetch('/api/signals'), fetch('/api/log'),
+        fetch('/api/signals'), fetch('/api/log'), fetch('/api/newsletter'),
       ]);
       const stats          = await sRes.json();
       const { trades }     = await tRes.json();
       const status         = await pRes.json();
       const signals        = await sigRes.json();
       const { log }        = await logRes.json();
+      const news           = await newsRes.json();
 
       renderKPIs(stats, status);
       renderCharts(trades);
@@ -321,11 +342,58 @@
       renderPositions(status);
       renderTrades(trades);
       renderLog(log);
+      renderNews(news);
 
       document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
     } catch (e) {
       console.error(e);
     }
+  }
+
+  const FACTOR_META = {
+    bull_factor:              { label: 'Bull Factor',            invert: false },
+    instability_factor:       { label: 'Instability',            invert: true  },
+    geopolitical_risk_factor: { label: 'Geopolitical Risk',      invert: true  },
+    economic_momentum_factor:{ label: 'Economic Momentum',      invert: false },
+    fed_policy_lean:          { label: 'Fed Policy Lean',        invert: true  },
+  };
+
+  function factorColor(value, invert) {
+    const v = invert ? (100 - value) : value;
+    if (v >= 66) return '#4ade80';
+    if (v >= 34) return '#fbbf24';
+    return '#f87171';
+  }
+
+  function renderNews(news) {
+    const wrap = document.getElementById('newsWrap');
+    const dl   = document.getElementById('newsletterDownload');
+    const factors = news && news.factors;
+
+    if (!factors) {
+      wrap.innerHTML = '<div class="empty">No newsletter generated yet — first run is at 8:30am ET</div>';
+      dl.style.display = 'none';
+      return;
+    }
+
+    dl.style.display = news.pdf_available ? 'inline-block' : 'none';
+    const rationale = factors.rationale || {};
+
+    let html = '<div class="factor-grid">';
+    Object.keys(FACTOR_META).forEach(key => {
+      const meta  = FACTOR_META[key];
+      const value = factors[key] ?? 50;
+      const color = factorColor(value, meta.invert);
+      html += `<div class="factor-card">
+        <div class="factor-label">${meta.label}</div>
+        <div class="factor-value" style="color:${color}">${value}</div>
+        <div class="factor-track"><div class="factor-fill" style="width:${value}%;background:${color}"></div></div>
+        <div class="factor-rationale">${rationale[key] ?? ''}</div>
+      </div>`;
+    });
+    html += '</div>';
+    html += `<div class="news-meta">Date: ${factors.date ?? '—'} · ${factors.headline_count ?? 0} headlines analyzed</div>`;
+    wrap.innerHTML = html;
   }
 
   function renderKPIs(stats, status) {

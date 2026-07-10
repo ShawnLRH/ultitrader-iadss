@@ -44,6 +44,20 @@ class Config:
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 
+    # Groq (AI news analysis)
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    # Daily news job — runs at this America/New_York time (1h before the 9:30am ET open)
+    NEWS_RUN_HOUR_ET: int = int(os.getenv("NEWS_RUN_HOUR_ET", "8"))
+    NEWS_RUN_MINUTE_ET: int = int(os.getenv("NEWS_RUN_MINUTE_ET", "30"))
+    NEWSLETTER_DIR: str = os.getenv("NEWSLETTER_DIR", "newsletters")
+
+    # Macro news factor gates (1-100 scale; None/missing factors file never blocks — fail-open)
+    NEWS_BULL_BLOCK_LONG_BELOW: float = float(os.getenv("NEWS_BULL_BLOCK_LONG_BELOW", "30"))
+    NEWS_BULL_BLOCK_SHORT_ABOVE: float = float(os.getenv("NEWS_BULL_BLOCK_SHORT_ABOVE", "70"))
+    NEWS_INSTABILITY_BLOCK_LONG_ABOVE: float = float(os.getenv("NEWS_INSTABILITY_BLOCK_LONG_ABOVE", "80"))
+
     # Monitor loop frequency
     MONITOR_INTERVAL_SEC: int = int(os.getenv("MONITOR_INTERVAL_SEC", "30"))
     # Seconds after 9:30 AM ET open to block stock entries (avoids open volatility)

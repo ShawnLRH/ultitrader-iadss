@@ -1,6 +1,10 @@
 """Flask webhook server — receives TradingView alerts, serves dashboard and APIs."""
+import os
+import glob
 import logging
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
+
+import macro_factors
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +111,38 @@ def create_app(config, signal_engine, alerter, trade_logger=None):
     def api_signals():
         """Current per-symbol signal state (freshness, confluence, macro bias)."""
         return jsonify(signal_engine.get_signal_state())
+
+    @app.route("/api/newsletter", methods=["GET"])
+    def api_newsletter():
+        """Latest daily news factors + whether a PDF is currently available."""
+        factors = macro_factors.get_latest(config.NEWSLETTER_DIR)
+        pdf_files = glob.glob(os.path.join(config.NEWSLETTER_DIR, "newsletter_*.pdf"))
+        return jsonify({
+            "factors": factors,
+            "pdf_available": bool(pdf_files),
+        })
+
+    @app.route("/newsletter/download", methods=["GET"])
+    def newsletter_download():
+        """Serve the current (only) newsletter PDF."""
+        pdf_files = glob.glob(os.path.join(config.NEWSLETTER_DIR, "newsletter_*.pdf"))
+        if not pdf_files:
+            return jsonify({"error": "no newsletter available yet"}), 404
+        return send_file(pdf_files[0], as_attachment=True)
+
+    @app.route("/admin/run-news-job", methods=["POST"])
+    def admin_run_news_job():
+        """Manually trigger the daily news job (testing — doesn't wait for the 8:30am schedule)."""
+        secret = request.headers.get("X-Secret", "") or request.args.get("secret", "")
+        if config.WEBHOOK_SECRET and secret != config.WEBHOOK_SECRET:
+            return jsonify({"error": "unauthorized"}), 401
+        from news_analyst import run_daily_news_job
+        try:
+            factors = run_daily_news_job(config, alerter)
+            return jsonify({"status": "ok", "factors": factors})
+        except Exception as e:
+            logger.error(f"admin_run_news_job failed: {e}")
+            return jsonify({"error": str(e)}), 500
 
     @app.route("/admin/patch-trade", methods=["POST"])
     def admin_patch_trade():

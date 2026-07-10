@@ -18,6 +18,7 @@ from position_manager import PositionManager
 from signal_engine import SignalEngine
 from risk_manager import RiskManager
 from trade_logger import TradeLogger
+from news_scheduler import NewsScheduler
 from webhook_server import create_app
 
 logging.basicConfig(
@@ -112,6 +113,10 @@ def main():
 
     # Start risk monitor in daemon thread
     threading.Thread(target=risk_mgr.run, daemon=True, name="RiskMonitor").start()
+
+    # Start daily news scheduler in daemon thread (8:30am ET, 1h before open)
+    news_scheduler = NewsScheduler(cfg, alerter)
+    threading.Thread(target=news_scheduler.run, daemon=True, name="NewsScheduler").start()
 
     # Startup notification
     try:

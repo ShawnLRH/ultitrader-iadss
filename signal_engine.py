@@ -31,13 +31,17 @@ Exit rules (TIME-BOUNDED — SIGNAL_WINDOW_SEC freshness required):
 
 Entry guards:
   - Stock entries blocked within OPEN_BUFFER_SEC of 9:30 AM ET (default 30 min)
-  - OT macro is advisory only — logged but never blocks a trade
+  - Trend/OT macro state blocks entries against the prevailing direction
+  - AI news factors (news_analyst.py) block entries on extreme bull/instability
+    readings — fail-open if no newsletter has run yet (see macro_factors.py)
 """
 import time
 import datetime
 import logging
 from collections import deque
 from threading import Lock
+
+import macro_factors
 
 logger = logging.getLogger(__name__)
 
@@ -254,11 +258,38 @@ class SignalEngine:
         elapsed = (now_et - open_et).total_seconds()
         return 0 <= elapsed < self.config.OPEN_BUFFER_SEC
 
+    def _news_blocks_long(self, symbol: str) -> bool:
+        """AI news factors (see news_analyst.py) — fail-open if no factors file yet."""
+        factors = macro_factors.get_latest(self.config.NEWSLETTER_DIR)
+        if not factors:
+            return False
+        bull = factors.get("bull_factor", 50)
+        instability = factors.get("instability_factor", 50)
+        if bull <= self.config.NEWS_BULL_BLOCK_LONG_BELOW:
+            logger.info(f"{symbol}: news bull factor {bull} too low — blocking long entry")
+            return True
+        if instability >= self.config.NEWS_INSTABILITY_BLOCK_LONG_ABOVE:
+            logger.info(f"{symbol}: news instability factor {instability} too high — blocking long entry")
+            return True
+        return False
+
+    def _news_blocks_short(self, symbol: str) -> bool:
+        factors = macro_factors.get_latest(self.config.NEWSLETTER_DIR)
+        if not factors:
+            return False
+        bull = factors.get("bull_factor", 50)
+        if bull >= self.config.NEWS_BULL_BLOCK_SHORT_ABOVE:
+            logger.info(f"{symbol}: news bull factor {bull} too high — blocking short entry")
+            return True
+        return False
+
     def _can_enter_long(self, symbol: str, state: _SymbolState) -> bool:
         if not state.has_buy_confluence():
             return False
         if state.is_macro_bearish():
             logger.info(f"{symbol}: Trend/OT bearish — blocking long entry")
+            return False
+        if self._news_blocks_long(symbol):
             return False
         if self.position_mgr.daily_loss_limit_reached():
             logger.warning(f"{symbol}: daily loss limit reached")
@@ -280,6 +311,8 @@ class SignalEngine:
             return False
         if state.is_macro_bullish():
             logger.info(f"{symbol}: Trend/OT bullish — blocking short entry")
+            return False
+        if self._news_blocks_short(symbol):
             return False
         if self.position_mgr.daily_loss_limit_reached():
             return False
