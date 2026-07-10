@@ -38,7 +38,11 @@ class NewsScheduler:
             return datetime.datetime.utcnow()
 
     def _run(self, reason: str):
-        today = datetime.date.today().isoformat()
+        # Track "today" in the same ET basis the scheduling loop uses below — mixing this
+        # with a UTC-based date previously caused the loop's guard to never match during
+        # the ~4-5h/day window where UTC and ET fall on different calendar dates, triggering
+        # a repeated-run bug.
+        today = self._now_et().date().isoformat()
         logger.info(f"NewsScheduler: running daily news job ({reason})")
         try:
             run_daily_news_job(self.config, self.alerter)
