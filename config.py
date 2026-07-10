@@ -50,6 +50,9 @@ class Config:
     OPEN_BUFFER_SEC: int = int(os.getenv("OPEN_BUFFER_SEC", "1800"))
     # Minimum unrealized profit (USD) required before Trend=SELL alone can exit a long
     TREND_EXIT_MIN_PROFIT_USD: float = float(os.getenv("TREND_EXIT_MIN_PROFIT_USD", "3.0"))
+    # Maximum unrealized loss (USD) tolerated before a fresh Trend/OT reversal cuts a
+    # losing long early, instead of always riding it to the hard stop-loss.
+    TREND_EXIT_MAX_LOSS_USD: float = float(os.getenv("TREND_EXIT_MAX_LOSS_USD", "4.0"))
 
     # Target assets
     STOCK_SYMBOLS: list = [

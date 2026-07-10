@@ -16,10 +16,18 @@ Entry rules (Conf + MR both required — the security filter):
   (stocks only for shorts; crypto is long-only on Alpaca)
 
 Exit rules (TIME-BOUNDED — SIGNAL_WINDOW_SEC freshness required):
-  LONG exit fast:  fresh Trend=SELL OR OT=SELL, only if unrealized P&L >= +$3
+  LONG exit fast (profit):  fresh Trend=SELL OR OT=SELL, if unrealized P&L >= +TREND_EXIT_MIN_PROFIT_USD
+  LONG exit fast (loss-cut): fresh Trend=SELL OR OT=SELL, if unrealized P&L <= -TREND_EXIT_MAX_LOSS_USD
   LONG exit full:  fresh Conf=SELL + any fresh (MR/Trend/OT)=SELL — always exits
   SHORT exit:      fresh Conf=BUY + any fresh (MR/Trend/OT)=BUY — cover
   SL/TP:           risk manager checks every 30s independently
+
+  Why the loss-cut path exists (added after reviewing live trades): every closed
+  trade was hitting either the hard stop-loss or hard take-profit mechanically —
+  the Trend/OT fast exit only ever fired for profit-locking, never to cut a loser,
+  so a confirmed reversal against a red position was ignored until the full -1.5%
+  stop hit. This path lets a Trend/OT reversal close the position early once it's
+  underwater beyond a small tolerance, instead of always eating the full stop.
 
 Entry guards:
   - Stock entries blocked within OPEN_BUFFER_SEC of 9:30 AM ET (default 30 min)
@@ -192,6 +200,9 @@ class SignalEngine:
                     pnl = self._get_unrealized_pnl(symbol)
                     if pnl >= self.config.TREND_EXIT_MIN_PROFIT_USD:
                         self._exit_position(symbol, f"IADSS sell (trend) @ +${pnl:.2f}")
+                        return
+                    if pnl <= -self.config.TREND_EXIT_MAX_LOSS_USD:
+                        self._exit_position(symbol, f"IADSS sell (trend) — cutting loss @ ${pnl:.2f}")
                         return
 
             # Exit SHORT on buy confluence
