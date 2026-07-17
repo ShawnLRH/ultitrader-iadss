@@ -119,51 +119,77 @@ def _headlines_block(headlines: list[dict]) -> str:
     return "\n".join(lines)
 
 
-SECTION_NAMES = [
-    "GEOPOLITICAL & CONFLICT",
-    "GLOBAL ECONOMY & CENTRAL BANKS",
-    "POLITICS & ELECTIONS",
-    "DISASTERS & ACCIDENTS",
-    "MARKETS OUTLOOK & TRADING IMPLICATIONS",
-]
+_STORY_FIELDS = """FACTOR_IMPACT: <name the factor indicators that move and the direction, with the reason — e.g. "Geopolitical Risk UP — shipping routes threatened; Economic Momentum DOWN — export demand weakening">
+MARKET_VIEW: <2-3 sentences: which assets are biased UP or DOWN and through which mechanism — earnings, discount rates, supply, demand, risk premium, liquidity or positioning. Name indices, commodities, currencies, sectors or crypto. No unsupported ticker dumping.>
+CATALYST: <the next scheduled event, data release or decision that moves this story, with timing if known>
+INVALIDATION: <the specific evidence that would prove this view wrong>
+CONFIDENCE: <High, Medium or Low> | HORIZON: <intraday / days / 1-3 weeks / months>"""
 
-_EDITION_FORMAT = """===MAIN_HEADLINE===
-<3 to 6 words, ALL CAPS, punchy front-page newspaper headline for the day's dominant theme — may end with !!>
+_EDITION_FORMAT = f"""===MARKET_IN_30_SECONDS===
+<5 to 8 lines, one asset/market per line, format "MARKET: DIRECTION, size — main cause",
+e.g. "S&P 500 FUTURES: DOWN 1.2% — chipmaker selloff spreads". Cover major indices,
+rates/dollar, oil or gold, and BTC/ETH — but only what today's headlines actually support.>
+===MAIN_HEADLINE===
+<3 to 6 words, ALL CAPS, punchy front-page headline for the single most important market development — may end with !!>
 ===DECK===
 <one bold sentence, 12-22 words, expanding on the main headline>
-===LEAD===
-KICKER: <a 3-6 word section label for the lead story, e.g. "MARKETS ON EDGE">
-IMAGE: <number of the single most front-page-worthy headline, prefer ones tagged [PHOTO]>
-<two paragraphs, 70-100 words each — the front-page lead story tying together the day's most market-moving news>
-""" + "".join(f"""===SECTION: {name}===
-HEADLINE: <punchy newspaper headline for this section, 4-9 words>
-IMAGE: <number of the headline whose photo best fits this section, prefer [PHOTO], or NONE>
-QUOTE: <one striking pull-quote sentence capturing this section, 8-18 words, no quotation marks>
-<three paragraphs, 55-85 words each>
-""" for name in SECTION_NAMES)
+===TOP_SIGNAL===
+KICKER: <3-6 word label>
+IMAGE: <number of the most front-page-worthy headline, prefer ones tagged [PHOTO]>
+SOURCES: <numbers of the headlines this story draws on, e.g. 3, 7, 12>
+WHY_TOP: <one sentence: why this development outranks every other story today>
+<two short paragraphs, 50-80 words each: FIRST the verified facts — dates, numbers,
+names, decisions; SECOND why it matters now — what changed versus expectations>
+{_STORY_FIELDS}
+===STORY: <headline stating the event AND its market consequence, 6-12 words>===
+IMAGE: <headline number whose photo fits, prefer [PHOTO], or NONE>
+SOURCES: <headline numbers this story draws on>
+<two short paragraphs, 45-75 words each: FIRST verified facts, SECOND why it matters now>
+{_STORY_FIELDS}
+===IMPACT_BOARD===
+WINNERS: <assets/sectors biased higher today, each with a two-or-three-word reason>
+LOSERS: <assets/sectors biased lower, each with a short reason>
+HEDGES: <what hedges today's dominant risks>
+NEUTRAL: <major assets with no clear bias today>
+===DESK_VIEW===
+BASE: <most likely path for risk assets over the horizon, with its trigger>
+UPSIDE: <bull case and what triggers it>
+DOWNSIDE: <bear case and what triggers it>
+===WHAT_CHANGES_OUR_VIEW===
+<3 to 5 lines, one per line: a specific data release, price level, policy decision or
+geopolitical event that would reverse today's conclusions>"""
 
 
 def generate_newsletter_text(cfg, headlines: list[dict]) -> str:
-    """Structured newspaper 'edition' text — parsed by _parse_edition for the vintage PDF."""
-    prompt = f"""You are the editor of a vintage-style daily financial broadsheet read by an
-active trading desk that trades US stocks and crypto. Using ONLY the numbered headlines
-below (today's aggregated news), write today's edition.
+    """Structured 'daily risk brief' edition text — parsed by _parse_edition for the vintage PDF."""
+    prompt = f"""You are the editor of ULTITRADER — a 5-minute global risk brief for an active
+trading desk that trades US stocks and crypto. It must read like a decision brief, not a
+general newspaper: the news is the evidence, the factor indicators are the interpretation,
+the market view is the conclusion.
+
+THE ONE RULE: every story must answer — what does this change in the market, which factor
+indicator moves, which assets may rise or fall, and why (through which mechanism)?
+
+The factor indicators are: Bull Factor, Fear & Instability, Geopolitical Risk,
+Economic Momentum, Fed Policy Lean.
+
+Using ONLY the numbered headlines below (today's aggregated news), write today's edition.
 
 OUTPUT FORMAT — copy the ===MARKER=== lines EXACTLY as shown, fill in the content.
-No markdown, no JSON, no extra commentary before or after:
+Write 4 to 6 ===STORY: ...=== blocks. No markdown, no JSON, no extra commentary:
 
 {_EDITION_FORMAT}
-Requirements:
-- Be specific — cite the actual events, countries, companies and figures from the
-  headlines. Never write generic filler.
-- Short, punchy, readable paragraphs — this is a newspaper, not an essay.
-- Headlines must read like real newspaper headlines: active voice, present tense.
-- The MARKETS OUTLOOK section must explicitly connect the day's news to likely
-  near-term impact on US equities (especially high-beta names like NVDA, TSLA, COIN,
-  MARA) and crypto (BTC, ETH, SOL and majors).
-- If a section genuinely has little relevant news today, say so briefly in one
-  paragraph rather than padding it.
-- IMAGE numbers must reference the numbered headline list below.
+
+Story selection rules:
+- Include only events with a credible transmission mechanism into prices, earnings,
+  rates, commodities, currencies, liquidity or risk appetite.
+- Include contradictory evidence where it exists — it sharpens the scenarios.
+- Exclude human-interest stories unless they change market risk, policy or supply chains.
+- Never merely say an event "could affect markets" — always give the direction and the
+  mechanism, and separate reported facts from desk interpretation.
+- Be specific: cite the actual events, countries, companies and figures from the headlines.
+- Short, punchy paragraphs. The whole issue must be readable in about five minutes.
+- IMAGE and SOURCES numbers must reference the numbered headline list below.
 
 TODAY'S NUMBERED HEADLINES:
 {_headlines_block(headlines)}
@@ -184,11 +210,12 @@ TODAY'S NUMBERED HEADLINES:
         time.sleep(65)  # fresh TPM window before the follow-up call
         expand_prompt = f"""The newspaper edition below is too short ({word_count} words). Rewrite it,
 keeping EXACTLY the same ===MARKER=== structure, the same KICKER:/HEADLINE:/IMAGE:/QUOTE:
-fields and the same facts, but expand every section's paragraphs with more depth:
-causes, context, named parties, numbers, and second-order effects. Target 900-1200
-words total, and keep every individual paragraph under 90 words — split into more
-paragraphs rather than writing longer ones. Output the full rewritten edition in
-the same format, nothing else.
+fields and the same facts, but deepen the stories: causes, named parties, numbers,
+second-order effects, and sharper MARKET_VIEW mechanisms. Keep every ===MARKER=== line
+and every FIELD: line (FACTOR_IMPACT, MARKET_VIEW, CATALYST, INVALIDATION, CONFIDENCE)
+exactly in place. Target 900-1200 words total, and keep every individual paragraph
+under 80 words — add stories rather than writing longer paragraphs. Output the full
+rewritten edition in the same format, nothing else.
 
 CURRENT DRAFT:
 {text}
@@ -216,7 +243,14 @@ object, no other text, in exactly this shape:
   "economic_momentum_factor": <int 1-100, 1=recessionary signals, 100=strong growth signals>,
   "fed_policy_lean": <int 1-100, 1=very dovish/rate-cut-leaning, 100=very hawkish/tightening-leaning>,
   "rationale": {{
-    "bull_factor": "<one sentence>",
+    "bull_factor": "<one sentence: the evidence from today's headlines behind this score>",
+    "instability_factor": "<one sentence>",
+    "geopolitical_risk_factor": "<one sentence>",
+    "economic_momentum_factor": "<one sentence>",
+    "fed_policy_lean": "<one sentence>"
+  }},
+  "market_link": {{
+    "bull_factor": "<one sentence: which assets this level favors or pressures, and why>",
     "instability_factor": "<one sentence>",
     "geopolitical_risk_factor": "<one sentence>",
     "economic_momentum_factor": "<one sentence>",
@@ -250,6 +284,7 @@ TODAY'S AGGREGATED HEADLINES:
         logger.error("generate_factors: no usable JSON — falling back to neutral (50) defaults")
         result = dict(_NEUTRAL_FACTORS)
         result["rationale"] = {k: "AI analysis unavailable — neutral default." for k in FACTOR_KEYS}
+        result["market_link"] = {}
         return result
 
     result = {}
@@ -260,6 +295,7 @@ TODAY'S AGGREGATED HEADLINES:
             v = 50
         result[k] = max(1, min(100, v))
     result["rationale"] = parsed.get("rationale", {}) if isinstance(parsed.get("rationale"), dict) else {}
+    result["market_link"] = parsed.get("market_link", {}) if isinstance(parsed.get("market_link"), dict) else {}
     return result
 
 
@@ -274,38 +310,70 @@ def _strip_md(text: str) -> str:
     return text.lstrip("# ").strip()
 
 
+# Fields a story block may carry. "Long" fields accept wrapped continuation lines.
+_FIELD_KEYS = (
+    "KICKER", "HEADLINE", "IMAGE", "QUOTE", "SOURCES", "WHY_TOP", "FACTOR_IMPACT",
+    "MARKET_VIEW", "CATALYST", "INVALIDATION", "CONFIDENCE",
+    "WINNERS", "LOSERS", "HEDGES", "NEUTRAL", "BASE", "UPSIDE", "DOWNSIDE",
+)
+# WHY_TOP is deliberately NOT here: the story paragraphs follow it directly
+# (often without a blank line), and continuation-gluing would swallow them.
+_LONG_FIELDS = {
+    "FACTOR_IMPACT", "MARKET_VIEW", "CATALYST", "INVALIDATION",
+    "WINNERS", "LOSERS", "HEDGES", "NEUTRAL", "BASE", "UPSIDE", "DOWNSIDE",
+}
+_FIELD_RE = re.compile(rf"^[*_`#\-\s]*({'|'.join(_FIELD_KEYS)})\s*:\s*(.*)$", re.IGNORECASE)
+
+
 def _parse_block(body: str) -> dict:
-    """One LEAD/SECTION body → {kicker, headline, image_idx, quote, paras}."""
-    out = {"kicker": "", "headline": "", "image_idx": None, "quote": "", "paras": []}
-    plain_lines = []
-    for line in body.split("\n"):
-        stripped = line.strip()
-        m = re.match(r"^[*_`#\s]*(KICKER|HEADLINE|IMAGE|QUOTE)\s*:\s*(.*)$", stripped, re.IGNORECASE)
+    """One TOP_SIGNAL/STORY/board body → {fields, paras, image_idx, sources,
+    confidence, horizon}. A non-blank line directly after a long field is treated
+    as that field wrapping, not a new paragraph."""
+    out = {"fields": {}, "paras": [], "image_idx": None, "sources": [], "confidence": "", "horizon": ""}
+    plain_lines: list[str] = []
+    last_field = None
+    for raw in body.split("\n"):
+        line = raw.strip()
+        if not line:
+            plain_lines.append("")
+            last_field = None
+            continue
+        m = _FIELD_RE.match(line)
         if m:
             key, val = m.group(1).upper(), _strip_md(m.group(2)).strip('"“”')
-            if key == "IMAGE":
-                num = re.search(r"\d+", val)
-                out["image_idx"] = int(num.group(0)) if num else None
-            elif key == "KICKER":
-                out["kicker"] = val
-            elif key == "HEADLINE":
-                out["headline"] = val
-            elif key == "QUOTE":
-                out["quote"] = val
+            out["fields"][key] = val
+            last_field = key if key in _LONG_FIELDS else None
+        elif last_field:
+            out["fields"][last_field] += " " + _strip_md(line)
         else:
-            plain_lines.append(line)
+            plain_lines.append(raw)
     rest = "\n".join(plain_lines).strip()
     out["paras"] = [_strip_md(" ".join(p.split())) for p in re.split(r"\n\s*\n", rest) if p.strip()]
+
+    if "IMAGE" in out["fields"]:
+        num = re.search(r"\d+", out["fields"]["IMAGE"])
+        out["image_idx"] = int(num.group(0)) if num else None
+    if "SOURCES" in out["fields"]:
+        out["sources"] = [int(n) for n in re.findall(r"\d+", out["fields"]["SOURCES"])][:8]
+    conf = out["fields"].get("CONFIDENCE", "")
+    if conf:
+        # "Medium | HORIZON: 1-3 weeks" — HORIZON may ride on the same line
+        hm = re.search(r"HORIZON\s*:?\s*(.+)$", conf, re.IGNORECASE)
+        out["horizon"] = _strip_md(hm.group(1)) if hm else ""
+        out["confidence"] = conf.split("|")[0].strip().strip('.')
     return out
 
 
 def _parse_edition(text: str) -> dict | None:
-    """Parse the ===MARKER=== edition format. Returns None if it doesn't look
+    """Parse the ===MARKER=== risk-brief format. Returns None if it doesn't look
     structured (renderer then falls back to plain rendering of the raw text)."""
     parts = re.split(r"^\s*===\s*(.+?)\s*===\s*$", text, flags=re.MULTILINE)
     if len(parts) < 5:
         return None
-    ed = {"main_headline": "", "deck": "", "lead": None, "sections": []}
+    ed = {
+        "main_headline": "", "deck": "", "ticker": [], "top": None, "stories": [],
+        "impact": {}, "desk_view": {}, "view_changers": [],
+    }
     for marker, body in zip(parts[1::2], parts[2::2]):
         marker = marker.strip().upper()
         body = body.strip()
@@ -313,14 +381,21 @@ def _parse_edition(text: str) -> dict | None:
             ed["main_headline"] = _strip_md(" ".join(body.split())).upper()
         elif marker == "DECK":
             ed["deck"] = _strip_md(" ".join(body.split()))
-        elif marker == "LEAD":
-            ed["lead"] = _parse_block(body)
-        elif marker.startswith("SECTION"):
-            name = marker.split(":", 1)[1].strip() if ":" in marker else marker
+        elif marker == "MARKET_IN_30_SECONDS":
+            ed["ticker"] = [_strip_md(ln.strip().lstrip("-•· ")) for ln in body.split("\n") if ln.strip()][:8]
+        elif marker == "TOP_SIGNAL":
+            ed["top"] = _parse_block(body)
+        elif marker.startswith("STORY"):
             blk = _parse_block(body)
-            blk["name"] = name
-            ed["sections"].append(blk)
-    if not ed["main_headline"] or len(ed["sections"]) < 3:
+            blk["headline"] = _strip_md(marker.split(":", 1)[1].strip()) if ":" in marker else ""
+            ed["stories"].append(blk)
+        elif marker == "IMPACT_BOARD":
+            ed["impact"] = _parse_block(body)["fields"]
+        elif marker == "DESK_VIEW":
+            ed["desk_view"] = _parse_block(body)["fields"]
+        elif marker == "WHAT_CHANGES_OUR_VIEW":
+            ed["view_changers"] = [_strip_md(ln.strip().lstrip("-•· ")) for ln in body.split("\n") if ln.strip()][:6]
+    if not ed["main_headline"] or not ed["top"] or len(ed["stories"]) < 3:
         return None
     return ed
 
@@ -519,16 +594,6 @@ FACTOR_PRINT = {
     "fed_policy_lean":          ("FED POLICY LEAN",       ("DOVISH", "BALANCED", "HAWKISH")),
 }
 
-# Section name keyword -> which factor gets stamped next to that section's headline.
-_SECTION_FACTOR = [
-    ("GEOPOLITICAL", "geopolitical_risk_factor"),
-    ("ECONOMY", "economic_momentum_factor"),
-    ("POLITICS", "instability_factor"),
-    ("DISASTER", "instability_factor"),
-    ("MARKETS", "bull_factor"),
-]
-
-
 def _verdict(key: str, value: int) -> str:
     words = FACTOR_PRINT[key][1]
     return words[0] if value < 34 else (words[1] if value < 66 else words[2])
@@ -549,9 +614,10 @@ def _factor_bar(value: int, width, fonts, height=0.13 * inch):
     return bar
 
 
-def _barometer(factors: dict, width, fonts) -> KeepTogether:
-    """Front-page 'THE DESK BAROMETER' box — the five macro factors as vintage
-    ink gauges with verdict stamps and one-line rationales."""
+def _barometer(factors: dict, prev_factors: dict | None, width, fonts) -> KeepTogether:
+    """'THE DESK BAROMETER' box — the five macro factors as vintage ink gauges
+    with verdict stamps, change vs the previous issue, the evidence behind each
+    score and its market consequence."""
     label_style = ParagraphStyle("BLabel", fontName=fonts["head"], fontSize=10.5, leading=12, textColor=INK)
     verdict_style = ParagraphStyle("BVerdict", fontName=fonts["head"], fontSize=10.5, leading=12,
                                    textColor=INK, alignment=TA_RIGHT)
@@ -564,18 +630,27 @@ def _barometer(factors: dict, width, fonts) -> KeepTogether:
 
     inner_w = width - 2 * 10  # box padding
     rationale = factors.get("rationale", {})
+    market_link = factors.get("market_link", {}) if isinstance(factors.get("market_link"), dict) else {}
     rows, styles_extra = [], []
     rows.append([[Paragraph("THE DESK BAROMETER", title_style),
-                  Paragraph("TODAY'S AI MACRO FACTORS  *  SCORED 1-100 FROM THE MORNING WIRE", sub_title_style)]])
+                  Paragraph("TODAY'S AI MACRO FACTORS  *  SCORED 1-100  *  CHANGE VS PREVIOUS ISSUE", sub_title_style)]])
     styles_extra.append(("BACKGROUND", (0, 0), (-1, 0), INK))
 
     for k in FACTOR_KEYS:
         value = max(1, min(100, int(factors.get(k, 50))))
         name = FACTOR_PRINT[k][0]
+        delta_txt = "new"
+        try:
+            prev_v = int(prev_factors.get(k)) if prev_factors else None
+            if prev_v is not None:
+                d = value - prev_v
+                delta_txt = f"{'+' if d > 0 else ''}{d}" if d else "unch"
+        except (TypeError, ValueError):
+            pass
         header = Table(
             [[Paragraph(name, label_style),
-              Paragraph(f"{value} / 100 — {_verdict(k, value)}", verdict_style)]],
-            colWidths=[inner_w * 0.55, inner_w * 0.45],
+              Paragraph(f"{value} / 100 ({delta_txt}) — {_verdict(k, value)}", verdict_style)]],
+            colWidths=[inner_w * 0.45, inner_w * 0.55],
         )
         header.setStyle(TableStyle([
             ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
@@ -584,7 +659,12 @@ def _barometer(factors: dict, width, fonts) -> KeepTogether:
         block = [header, _factor_bar(value, inner_w, fonts), Spacer(1, 2)]
         note = rationale.get(k, "")
         if note:
-            block.append(Paragraph(escape(note), rationale_style))
+            block.append(Paragraph(f'<font name="{fonts["head"]}" size="7.4">EVIDENCE:</font> {escape(note)}',
+                                   rationale_style))
+        link = market_link.get(k, "")
+        if link:
+            block.append(Paragraph(f'<font name="{fonts["head"]}" size="7.4">MARKET LINK:</font> {escape(link)}',
+                                   rationale_style))
         block.append(Spacer(1, 5))
         rows.append([block])
 
@@ -601,27 +681,154 @@ def _barometer(factors: dict, width, fonts) -> KeepTogether:
     return KeepTogether(box)
 
 
-def _factor_stamp(key: str, factors: dict, fonts) -> Table:
-    """Small boxed index chip stamped beside a section headline, e.g.
-    | GEOPOLITICAL RISK  90/100 — HIGH ALERT |"""
-    value = max(1, min(100, int(factors.get(key, 50))))
-    style = ParagraphStyle("Stamp", fontName=fonts["head"], fontSize=8.2, leading=10,
-                           textColor=INK, alignment=TA_CENTER)
-    chip = Table([[Paragraph(f"{FACTOR_PRINT[key][0]}: {value}/100 — {_verdict(key, value)}", style)]])
-    chip.setStyle(TableStyle([
+def _brief_box(title, inner_rows, width, fonts, subtitle=""):
+    """Black title bar + content rows in a bordered box — shared chrome for the
+    ticker, impact board, desk view and view-changers blocks."""
+    title_style = ParagraphStyle("BoxTitle", fontName=fonts["head"], fontSize=11.5, leading=13.5,
+                                 textColor=PAPER, alignment=TA_CENTER)
+    sub_style = ParagraphStyle("BoxSub", fontName=fonts["label"], fontSize=7, leading=9,
+                               textColor=PAPER, alignment=TA_CENTER)
+    head = [Paragraph(title, title_style)]
+    if subtitle:
+        head.append(Paragraph(subtitle, sub_style))
+    rows = [[head]] + [[r] for r in inner_rows]
+    box = Table(rows, colWidths=[width])
+    box.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 1.8, INK),
+        ("BACKGROUND", (0, 0), (-1, 0), INK),
+        ("LINEBELOW", (0, 0), (-1, 0), 1.0, INK),
+        ("TOPPADDING", (0, 0), (-1, 0), 5), ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+        ("TOPPADDING", (0, 1), (-1, -1), 2), ("BOTTOMPADDING", (0, 1), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9), ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+    ]))
+    return box
+
+
+def _ticker_box(items, width, fonts):
+    """'Market in 30 Seconds' — one bolded line per market move."""
+    line_style = ParagraphStyle("Tick", fontName="Times-Roman", fontSize=9.4, leading=12.5, textColor=INK)
+    rows = []
+    for it in items:
+        it = escape(it)
+        if ":" in it:
+            head, rest = it.split(":", 1)
+            it = f'<font name="{fonts["head"]}" size="9">{head.upper()}:</font>{rest}'
+        rows.append(Paragraph(it, line_style))
+    return _brief_box("MARKET IN 30 SECONDS", rows, width, fonts,
+                      subtitle="THE OVERNIGHT TAPE AT A GLANCE")
+
+
+def _desk_card(blk, width, fonts):
+    """The story's decision footer: factor impact, market view + mechanism,
+    next catalyst, invalidation and confidence/horizon."""
+    f = blk.get("fields", {})
+    label_style = ParagraphStyle("CardLab", fontName=fonts["head"], fontSize=7.8, leading=10, textColor=INK)
+    val_style = ParagraphStyle("CardVal", fontName="Times-Roman", fontSize=9.2, leading=11.8, textColor=INK)
+    conf = " · ".join(x for x in (blk.get("confidence", ""), blk.get("horizon", "")) if x)
+    rows = []
+    for label, val in (
+        ("FACTOR IMPACT", f.get("FACTOR_IMPACT", "")),
+        ("MARKET VIEW", f.get("MARKET_VIEW", "")),
+        ("NEXT CATALYST", f.get("CATALYST", "")),
+        ("INVALIDATION", f.get("INVALIDATION", "")),
+        ("CONFIDENCE / HORIZON", conf),
+    ):
+        if val:
+            rows.append([Paragraph(label, label_style), Paragraph(escape(val), val_style)])
+    if not rows:
+        return None
+    card = Table(rows, colWidths=[1.35 * inch, width - 1.35 * inch])
+    card.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 1.2, INK),
-        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.4, INK_SOFT),
+        ("BACKGROUND", (0, 0), (0, -1), PAPER_DIM),
+        ("LINEAFTER", (0, 0), (0, -1), 0.8, INK),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]))
-    return chip
+    return card
 
 
-def _section_factor_key(section_name: str) -> str | None:
-    up = section_name.upper()
-    for keyword, key in _SECTION_FACTOR:
-        if keyword in up:
-            return key
-    return None
+def _impact_board(fields, width, fonts):
+    """Cross-Market Impact Board — 2x2 winners/losers/hedges/neutral grid."""
+    lab_style = ParagraphStyle("ImpLab", fontName=fonts["head"], fontSize=8.8, leading=11, textColor=INK)
+    txt_style = ParagraphStyle("ImpTxt", fontName="Times-Roman", fontSize=9, leading=11.5, textColor=INK)
+    cells = []
+    for key, label in (("WINNERS", "LIKELY WINNERS"), ("LOSERS", "LIKELY LOSERS"),
+                       ("HEDGES", "HEDGES"), ("NEUTRAL", "NEUTRAL")):
+        if fields.get(key):
+            cells.append([Paragraph(label, lab_style), Spacer(1, 2),
+                          Paragraph(escape(fields[key]), txt_style)])
+    if not cells:
+        return None
+    while len(cells) % 2:
+        cells.append([Paragraph("", txt_style)])
+    grid = Table([cells[i:i + 2] for i in range(0, len(cells), 2)],
+                 colWidths=[(width - 18) / 2.0] * 2)
+    grid.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("INNERGRID", (0, 0), (-1, -1), 0.6, INK_SOFT),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    return _brief_box("CROSS-MARKET IMPACT BOARD", [grid], width, fonts,
+                      subtitle="WHO GAINS, WHO LOSES, WHAT HEDGES")
+
+
+def _desk_view_box(fields, view_changers, width, fonts):
+    """Desk View & Scenarios (base/upside/downside) + What Changes Our View."""
+    lab_style = ParagraphStyle("DvLab", fontName=fonts["head"], fontSize=8.2, leading=10.5, textColor=INK)
+    txt_style = ParagraphStyle("DvTxt", fontName="Times-Roman", fontSize=9.2, leading=11.8, textColor=INK)
+    rows = []
+    for key, label in (("BASE", "BASE CASE"), ("UPSIDE", "UPSIDE CASE"), ("DOWNSIDE", "DOWNSIDE CASE")):
+        if fields.get(key):
+            rows.append(Table([[Paragraph(label, lab_style), Paragraph(escape(fields[key]), txt_style)]],
+                              colWidths=[1.15 * inch, width - 18 - 1.15 * inch],
+                              style=TableStyle([
+                                  ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                  ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                                  ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                              ])))
+    if view_changers:
+        rows.append(Spacer(1, 3))
+        rows.append(_hr(0.6, color=INK_SOFT))
+        rows.append(Spacer(1, 3))
+        rows.append(Paragraph("WHAT CHANGES OUR VIEW", lab_style))
+        for item in view_changers:
+            rows.append(Paragraph(f"— {escape(item)}", txt_style))
+    if not rows:
+        return None
+    return _brief_box("DESK VIEW &amp; SCENARIOS", rows, width, fonts,
+                      subtitle="BASE / UPSIDE / DOWNSIDE — AND WHAT WOULD REVERSE THE CALL")
+
+
+def _sources_block(ed, headlines, fonts):
+    """Numbered source list for every story's cited headlines + compile timestamp,
+    separating reported facts from desk interpretation."""
+    idxs: list[int] = []
+    blocks = ([ed["top"]] if ed.get("top") else []) + ed.get("stories", [])
+    for b in blocks:
+        for n in b.get("sources", []):
+            if n not in idxs and headlines and 1 <= n <= len(headlines):
+                idxs.append(n)
+    src_style = ParagraphStyle("Src", fontName="Times-Roman", fontSize=8, leading=10.4, textColor=INK_SOFT)
+    lab_style = ParagraphStyle("SrcLab", fontName=fonts["head"], fontSize=10, leading=12.5, textColor=INK)
+    flows: list = [Spacer(1, 12), _hr(1.6), Spacer(1, 4),
+                   Paragraph("SOURCES &amp; TIMESTAMP", lab_style), Spacer(1, 3)]
+    for n in idxs[:16]:
+        h = headlines[n - 1]
+        flows.append(Paragraph(
+            f"[{n}]  {escape(h.get('source', ''))} — {escape(h.get('title', ''))}"
+            f" ({escape(h.get('published', ''))} UTC)", src_style))
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")
+    flows.append(Spacer(1, 4))
+    flows.append(Paragraph(
+        f"Compiled {stamp} UTC · ULTITRADER IADSS DESK. Reported facts are drawn from the sources above; "
+        "factor scores, market views, scenarios and invalidation points are desk interpretation "
+        "generated by AI and are not investment advice.", src_style))
+    # One atomic block — a lone timestamp orphaned on its own page looks broken.
+    return [KeepTogether(flows)]
 
 
 # --- page furniture ---
@@ -719,8 +926,9 @@ def _story_with_photo(paras_flow, photo, width, photo_right=True):
     return tbl
 
 
-def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, headlines: list[dict] | None = None):
-    """Render the daily edition as a vintage black-and-white broadsheet PDF."""
+def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str,
+              headlines: list[dict] | None = None, prev_factors: dict | None = None):
+    """Render the daily risk brief as a vintage black-and-white broadsheet PDF."""
     fonts = _register_fonts()
     try:
         d = datetime.date.fromisoformat(date_str)
@@ -752,9 +960,9 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
         "SecHead", fontName=fonts["head"], fontSize=22, leading=24.5,
         textColor=INK, spaceAfter=2,
     )
-    quote_style = ParagraphStyle(
-        "PullQuote", fontName="Times-BoldItalic", fontSize=13.5, leading=17,
-        alignment=TA_CENTER, textColor=INK, spaceBefore=2, spaceAfter=2,
+    why_style = ParagraphStyle(
+        "WhyTop", fontName="Times-Italic", fontSize=10, leading=13,
+        textColor=INK_SOFT, spaceAfter=8,
     )
 
     ed = _parse_edition(newsletter_text)
@@ -765,56 +973,58 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
     story.append(Spacer(1, 12))
 
     if ed:
-        # --- front page: stamped headline, deck, lead story + photo ---
+        # --- front page: stamped headline, market ticker, top signal ---
         for i, line in enumerate(_split_headline(ed["main_headline"])):
-            story.append(_PosterLine(line, fonts["head"], max_size=76 if i == 0 else 54))
+            story.append(_PosterLine(line, fonts["head"], max_size=64 if i == 0 else 48))
             story.append(Spacer(1, 4))
         story.append(Spacer(1, 4))
         _double_rule(story, heavy=2.4, light=0.8, heavy_first=True, gap=2.0)
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 10))
 
-        # Kicker + deck run full width; only the first text chunk shares the
-        # unsplittable two-column table with the photo, so the front page can
-        # never be starved by an over-long lead.
-        lead = ed["lead"] or {"kicker": "", "paras": [], "image_idx": None, "quote": ""}
-        if lead.get("kicker"):
-            story.append(Paragraph(escape(lead["kicker"].upper()), kicker_style))
+        if ed["ticker"]:
+            story.append(_ticker_box(ed["ticker"], width, fonts))
+            story.append(Spacer(1, 12))
+
+        # Top Signal — the front-page story. Kicker/deck/why-it-leads run full
+        # width; only the first text chunk shares the unsplittable two-column
+        # table with the photo, so the front page can't be starved.
+        top = ed["top"]
+        kicker = top["fields"].get("KICKER", "")
+        story.append(Paragraph(
+            "TOP SIGNAL" + (f"&nbsp;&nbsp;*&nbsp;&nbsp;{escape(kicker.upper())}" if kicker else ""),
+            kicker_style))
         if ed.get("deck"):
             story.append(Paragraph(escape(ed["deck"]), deck_style))
-        beside, below = _split_for_photo(lead.get("paras", []))
-        lead_flow = [Paragraph(escape(p), body_style) for p in beside]
-
-        photo = _image_for_story(headlines, lead.get("image_idx"), used_urls) or _any_image(headlines, used_urls)
+        if top["fields"].get("WHY_TOP"):
+            story.append(Paragraph(
+                f'<font name="{fonts["head"]}" size="8.5">WHY IT LEADS:</font> '
+                f'<i>{escape(top["fields"]["WHY_TOP"])}</i>', why_style))
+        beside, below = _split_for_photo(top.get("paras", []), max_chars=750)
+        top_flow = [Paragraph(escape(p), body_style) for p in beside]
+        photo = _image_for_story(headlines, top.get("image_idx"), used_urls) or _any_image(headlines, used_urls)
         if photo:
-            img_flow = _photo_flowable(photo[0], width * 0.44 - 18, 2.4 * inch, photo[1], fonts)
-            story.append(_story_with_photo(lead_flow, img_flow, width, photo_right=True))
+            img_flow = _photo_flowable(photo[0], width * 0.40 - 18, 2.0 * inch, photo[1], fonts)
+            story.append(_story_with_photo(top_flow, img_flow, width, photo_right=True))
         else:
-            story.extend(lead_flow)
+            story.extend(top_flow)
         for p in below:
             story.append(Paragraph(escape(p), body_style))
+        card = _desk_card(top, width, fonts)
+        if card:
+            story.append(Spacer(1, 2))
+            story.append(card)
 
+        # --- factor indicator dashboard ---
         story.append(Spacer(1, 14))
-        story.append(_barometer(factors, width, fonts))
+        story.append(_barometer(factors, prev_factors, width, fonts))
 
-        # --- sections flow on after the barometer, separated by double rules ---
-        for idx, sec in enumerate(ed["sections"]):
-            header: list = [Spacer(1, 18), _hr(2.4), Spacer(1, 2), _hr(0.8), Spacer(1, 8)]
-
-            label = Paragraph(f"*&nbsp;&nbsp;{escape(sec['name'])}&nbsp;&nbsp;*", kicker_style)
-            fkey = _section_factor_key(sec["name"])
-            if fkey:
-                head_row = Table([[label, _factor_stamp(fkey, factors, fonts)]],
-                                 colWidths=[width * 0.55, width * 0.45])
-                head_row.setStyle(TableStyle([
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ]))
-                header.append(head_row)
-            else:
-                header.append(label)
-            header.append(Spacer(1, 4))
+        # --- market-linked stories, each closed by its desk card ---
+        for idx, sec in enumerate(ed["stories"]):
+            header: list = [
+                Spacer(1, 18), _hr(2.4), Spacer(1, 2), _hr(0.8), Spacer(1, 8),
+                Paragraph(f"*&nbsp;&nbsp;MARKET-LINKED STORY {idx + 1}&nbsp;&nbsp;*", kicker_style),
+                Spacer(1, 4),
+            ]
             if sec.get("headline"):
                 header.append(Paragraph(escape(sec["headline"].upper()), section_head_style))
             header.append(Spacer(1, 6))
@@ -822,7 +1032,7 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
             photo = _image_for_story(headlines, sec.get("image_idx"), used_urls)
             if photo:
                 beside, below = _split_for_photo(sec.get("paras", []))
-                img_flow = _photo_flowable(photo[0], width * 0.42 - 18, 2.6 * inch, photo[1], fonts)
+                img_flow = _photo_flowable(photo[0], width * 0.42 - 18, 2.3 * inch, photo[1], fonts)
                 content = [_story_with_photo(
                     [Paragraph(escape(p), body_style) for p in beside],
                     img_flow, width, photo_right=(idx % 2 == 0))]
@@ -831,28 +1041,28 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
                 content = [Paragraph(escape(p), body_style) for p in sec.get("paras", [])]
 
             # Only the header + first content chunk stay glued — the rest
-            # flows freely so long sections don't force page breaks.
+            # flows freely so long stories don't force page breaks.
             story.append(KeepTogether(header + content[:1]))
             story.extend(content[1:])
+            card = _desk_card(sec, width, fonts)
+            if card:
+                story.append(Spacer(1, 2))
+                story.append(card)
 
-            if sec.get("quote"):
-                quote_tbl = Table(
-                    [[[_hr(1.0), Spacer(1, 5),
-                       Paragraph(f"&#8220;{escape(sec['quote'])}&#8221;", quote_style),
-                       Spacer(1, 5), _hr(1.0)]]],
-                    colWidths=[width * 0.8],
-                )
-                quote_tbl.setStyle(TableStyle([
-                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ]))
-                story.append(Spacer(1, 6))
-                story.append(quote_tbl)
-                story.append(Spacer(1, 8))
+        # --- impact board, desk view & scenarios, sources ---
+        board = _impact_board(ed["impact"], width, fonts)
+        if board:
+            story.append(Spacer(1, 18))
+            story.append(board)
+        dv = _desk_view_box(ed["desk_view"], ed["view_changers"], width, fonts)
+        if dv:
+            story.append(Spacer(1, 12))
+            story.append(dv)
+        story.extend(_sources_block(ed, headlines or [], fonts))
     else:
         # --- fallback: unstructured text — still render on newsprint ---
         logger.warning("build_pdf: edition parse failed — using fallback rendering")
-        story.append(_barometer(factors, width, fonts))
+        story.append(_barometer(factors, prev_factors, width, fonts))
         story.append(PageBreak())
         _append_plain_body(story, newsletter_text, fonts, body_style)
 
@@ -872,10 +1082,10 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
         story = []
         _masthead(story, fonts, date_print, vol_no)
         story.append(Spacer(1, 12))
-        story.append(_barometer(factors, width, fonts))
+        story.append(_barometer(factors, prev_factors, width, fonts))
         story.append(PageBreak())
         plain = re.sub(r"^\s*===\s*(.+?)\s*===\s*$", r"## \1", newsletter_text, flags=re.MULTILINE)
-        plain = re.sub(r"^(IMAGE|KICKER)\s*:.*$", "", plain, flags=re.MULTILINE)
+        plain = re.sub(r"^(IMAGE|KICKER|SOURCES)\s*:.*$", "", plain, flags=re.MULTILINE)
         _append_plain_body(story, plain, fonts, body_style)
         doc.build(story, onFirstPage=decor, onLaterPages=decor)
     logger.info(f"news_analyst: built PDF at {path}")
@@ -941,6 +1151,16 @@ def _run_daily_news_job(cfg, alerter=None) -> dict:
     if not headlines:
         logger.warning("run_daily_news_job: no headlines fetched — proceeding with empty set")
 
+    # Previous issue's factors (for the day-over-day change column in the
+    # barometer). Ephemeral storage means this survives day-to-day but not
+    # across deploys — fail-open to "new" markers when absent.
+    prev_factors = None
+    try:
+        with open(os.path.join(cfg.NEWSLETTER_DIR, "latest_factors.json")) as f:
+            prev_factors = json.load(f)
+    except Exception:
+        pass
+
     newsletter_text = generate_newsletter_text(cfg, headlines)
     # Groq's on-demand tier is capped at 12,000 tokens/minute — give the quota a full
     # minute to reset before the second call instead of risking a 429 on the same window.
@@ -953,21 +1173,37 @@ def _run_daily_news_job(cfg, alerter=None) -> dict:
     factors_out = dict(factors)
     factors_out["date"] = date_str
     factors_out["headline_count"] = len(headlines)
+    if prev_factors:
+        factors_out["previous"] = {k: prev_factors.get(k) for k in FACTOR_KEYS}
     with open(os.path.join(cfg.NEWSLETTER_DIR, "latest_factors.json"), "w") as f:
         json.dump(factors_out, f, indent=2)
+    try:
+        # Score history — one JSON line per issue. Becomes durable once the
+        # service gets a Railway volume; until then it spans deploy-to-deploy.
+        with open(os.path.join(cfg.NEWSLETTER_DIR, "factors_history.jsonl"), "a") as f:
+            f.write(json.dumps({k: factors_out.get(k) for k in FACTOR_KEYS + ["date", "headline_count"]}) + "\n")
+    except OSError as e:
+        logger.warning(f"run_daily_news_job: could not append factors history: {e}")
 
     _clear_old_newsletters(cfg.NEWSLETTER_DIR)
     pdf_path = os.path.join(cfg.NEWSLETTER_DIR, f"newsletter_{date_str}.pdf")
-    build_pdf(newsletter_text, factors, date_str, pdf_path, headlines=headlines)
+    build_pdf(newsletter_text, factors, date_str, pdf_path, headlines=headlines, prev_factors=prev_factors)
 
     if alerter:
+        def _fmt(k):
+            v = factors[k]
+            try:
+                d = v - int(prev_factors.get(k))
+                return f"{v} ({'+' if d > 0 else ''}{d})" if d else f"{v} (unch)"
+            except (TypeError, ValueError, AttributeError):
+                return str(v)
         alerter.send(
-            "📰 <b>Daily Market Intelligence ready</b>\n"
+            "📰 <b>Daily Risk Brief ready</b>\n"
             f"Date: {date_str}\n"
-            f"Bull: {factors['bull_factor']} | Instability: {factors['instability_factor']}\n"
-            f"Geopolitical risk: {factors['geopolitical_risk_factor']} | "
-            f"Econ momentum: {factors['economic_momentum_factor']} | "
-            f"Fed lean: {factors['fed_policy_lean']}\n"
+            f"Bull: {_fmt('bull_factor')} | Instability: {_fmt('instability_factor')}\n"
+            f"Geopolitical risk: {_fmt('geopolitical_risk_factor')} | "
+            f"Econ momentum: {_fmt('economic_momentum_factor')} | "
+            f"Fed lean: {_fmt('fed_policy_lean')}\n"
             f"({len(headlines)} headlines analyzed) — full PDF on the dashboard."
         )
 
