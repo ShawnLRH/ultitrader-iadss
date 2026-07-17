@@ -666,6 +666,19 @@ def _masthead(story, fonts, date_str, vol_no):
     story.append(_hr(1.2))
 
 
+def _split_for_photo(paras: list[str], max_paras=2, max_chars=1500) -> tuple[list[str], list[str]]:
+    """Cap how much text sits beside a photo — the two-column block is a Table
+    row, which ReportLab cannot split across pages, so an over-long AI story
+    would otherwise crash layout. Overflow paragraphs flow full-width below."""
+    beside, total = [], 0
+    for p in paras:
+        if len(beside) >= max_paras or (beside and total + len(p) > max_chars):
+            break
+        beside.append(p)
+        total += len(p)
+    return beside, paras[len(beside):]
+
+
 def _story_with_photo(paras_flow, photo, width, photo_right=True):
     """Two-column newspaper block: justified text beside a boxed photo."""
     text_w = width * 0.56
@@ -747,7 +760,8 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
             lead_flow.append(Paragraph(f"*&nbsp;&nbsp;{escape(lead['kicker'].upper())}", kicker_style))
         if ed.get("deck"):
             lead_flow.append(Paragraph(escape(ed["deck"]), deck_style))
-        for p in lead.get("paras", []):
+        beside, below = _split_for_photo(lead.get("paras", []))
+        for p in beside:
             lead_flow.append(Paragraph(escape(p), body_style))
 
         photo = _image_for_story(headlines, lead.get("image_idx"), used_urls) or _any_image(headlines, used_urls)
@@ -756,6 +770,8 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
             story.append(_story_with_photo(lead_flow, img_flow, width, photo_right=True))
         else:
             story.extend(lead_flow)
+        for p in below:
+            story.append(Paragraph(escape(p), body_style))
 
         story.append(Spacer(1, 14))
         story.append(_barometer(factors, width, fonts))
@@ -787,16 +803,16 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
                 block.append(Paragraph(escape(sec["headline"].upper()), section_head_style))
             block.append(Spacer(1, 6))
 
-            paras = [Paragraph(escape(p), body_style) for p in sec.get("paras", [])]
             photo = _image_for_story(headlines, sec.get("image_idx"), used_urls)
-            first_chunk = paras[:2] if photo else paras
-
             if photo:
+                beside, below = _split_for_photo(sec.get("paras", []))
                 img_flow = _photo_flowable(photo[0], width * 0.42 - 18, 2.6 * inch, photo[1], fonts)
-                block.append(_story_with_photo(first_chunk, img_flow, width, photo_right=(idx % 2 == 0)))
-                rest = paras[2:]
+                block.append(_story_with_photo(
+                    [Paragraph(escape(p), body_style) for p in beside],
+                    img_flow, width, photo_right=(idx % 2 == 0)))
+                rest = [Paragraph(escape(p), body_style) for p in below]
             else:
-                block.extend(first_chunk)
+                block.extend(Paragraph(escape(p), body_style) for p in sec.get("paras", []))
                 rest = []
 
             if sec.get("quote"):
@@ -821,24 +837,50 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
         logger.warning("build_pdf: edition parse failed — using fallback rendering")
         story.append(_barometer(factors, width, fonts))
         story.append(PageBreak())
-        h2_style = ParagraphStyle("H2F", fontName=fonts["head"], fontSize=17, leading=20,
-                                  textColor=INK, spaceBefore=14, spaceAfter=6)
-        for blk in re.split(r"\n(?=##\s)", newsletter_text.strip()):
-            blk = blk.strip()
-            if not blk:
-                continue
-            if blk.startswith("##"):
-                lines = blk.split("\n", 1)
-                story.append(Paragraph(escape(lines[0].lstrip("#").strip().upper()), h2_style))
-                blk = lines[1].strip() if len(lines) > 1 else ""
-            for para in blk.split("\n\n"):
-                para = para.strip()
-                if para:
-                    story.append(Paragraph(escape(" ".join(para.split())), body_style))
+        _append_plain_body(story, newsletter_text, fonts, body_style)
 
     decor = _page_decor(fonts, date_print)
-    doc.build(story, onFirstPage=decor, onLaterPages=decor)
+    try:
+        doc.build(story, onFirstPage=decor, onLaterPages=decor)
+    except Exception as e:
+        # Last-resort retry: a pathological AI story (e.g. an unsplittable
+        # oversized flowable) must never kill the daily job — rebuild the
+        # whole document as masthead + barometer + plain flowing text.
+        logger.error(f"build_pdf: layout failed ({e}) — retrying with plain rendering")
+        doc = SimpleDocTemplate(
+            path, pagesize=LETTER,
+            topMargin=0.55 * inch, bottomMargin=0.95 * inch,
+            leftMargin=0.7 * inch, rightMargin=0.7 * inch,
+        )
+        story = []
+        _masthead(story, fonts, date_print, vol_no)
+        story.append(Spacer(1, 12))
+        story.append(_barometer(factors, width, fonts))
+        story.append(PageBreak())
+        plain = re.sub(r"^\s*===\s*(.+?)\s*===\s*$", r"## \1", newsletter_text, flags=re.MULTILINE)
+        plain = re.sub(r"^(IMAGE|KICKER)\s*:.*$", "", plain, flags=re.MULTILINE)
+        _append_plain_body(story, plain, fonts, body_style)
+        doc.build(story, onFirstPage=decor, onLaterPages=decor)
     logger.info(f"news_analyst: built PDF at {path}")
+
+
+def _append_plain_body(story, text, fonts, body_style):
+    """Plain '## heading + prose' rendering — shared by the parse-failure
+    fallback and the layout-crash retry."""
+    h2_style = ParagraphStyle("H2F", fontName=fonts["head"], fontSize=17, leading=20,
+                              textColor=INK, spaceBefore=14, spaceAfter=6)
+    for blk in re.split(r"\n(?=##\s)", text.strip()):
+        blk = blk.strip()
+        if not blk:
+            continue
+        if blk.startswith("##"):
+            lines = blk.split("\n", 1)
+            story.append(Paragraph(escape(lines[0].lstrip("#").strip().upper()), h2_style))
+            blk = lines[1].strip() if len(lines) > 1 else ""
+        for para in blk.split("\n\n"):
+            para = para.strip()
+            if para:
+                story.append(Paragraph(escape(" ".join(para.split())), body_style))
 
 
 def _clear_old_newsletters(directory: str):
@@ -888,15 +930,18 @@ def _run_daily_news_job(cfg, alerter=None) -> dict:
     time.sleep(65)
     factors = generate_factors(cfg, headlines)
 
-    _clear_old_newsletters(cfg.NEWSLETTER_DIR)
-    pdf_path = os.path.join(cfg.NEWSLETTER_DIR, f"newsletter_{date_str}.pdf")
-    build_pdf(newsletter_text, factors, date_str, pdf_path, headlines=headlines)
-
+    # Persist factors BEFORE building the PDF — the trading gate in
+    # signal_engine.py reads this file, and it must not be lost if the
+    # (cosmetic) PDF rendering step fails.
     factors_out = dict(factors)
     factors_out["date"] = date_str
     factors_out["headline_count"] = len(headlines)
     with open(os.path.join(cfg.NEWSLETTER_DIR, "latest_factors.json"), "w") as f:
         json.dump(factors_out, f, indent=2)
+
+    _clear_old_newsletters(cfg.NEWSLETTER_DIR)
+    pdf_path = os.path.join(cfg.NEWSLETTER_DIR, f"newsletter_{date_str}.pdf")
+    build_pdf(newsletter_text, factors, date_str, pdf_path, headlines=headlines)
 
     if alerter:
         alerter.send(
