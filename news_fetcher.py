@@ -6,11 +6,13 @@ topical feeds + major wire services), dedupes by normalized title, and filters
 to roughly the last day so the daily digest reflects overnight developments.
 """
 import logging
+import re
 import time
 import calendar
 from datetime import datetime, timezone
 
 import feedparser
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,53 @@ def _normalize_title(title: str) -> str:
     return " ".join(title.lower().split())[:140]
 
 
+def _entry_image(entry) -> str:
+    """Image URL embedded in the RSS entry itself (media:content / media:thumbnail /
+    enclosure / <img> in the summary HTML). Empty string if the feed carries none."""
+    for m in (getattr(entry, "media_content", None) or []):
+        url = m.get("url", "")
+        if url and not str(m.get("type", "")).startswith(("video", "audio")):
+            return url
+    for m in (getattr(entry, "media_thumbnail", None) or []):
+        if m.get("url"):
+            return m["url"]
+    for enc in (getattr(entry, "enclosures", None) or []):
+        if str(enc.get("type", "")).startswith("image") and enc.get("href"):
+            return enc["href"]
+    summary = getattr(entry, "summary", "") or ""
+    m = re.search(r'<img[^>]+src=["\']([^"\']+)', summary)
+    return m.group(1) if m else ""
+
+
+_OG_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+
+def resolve_article_image(link: str, timeout: int = 8) -> str:
+    """Fetch the article page and pull its og:image / twitter:image.
+
+    Skips news.google.com redirect stubs — their og:image is always the generic
+    Google News logo, never the article photo.
+    """
+    if not link or "news.google.com" in link:
+        return ""
+    try:
+        resp = requests.get(link, timeout=timeout, headers=_OG_UA)
+        html = resp.text[:200_000]
+    except requests.RequestException as e:
+        logger.debug(f"news_fetcher: og:image fetch failed for {link}: {e}")
+        return ""
+    m = re.search(
+        r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)(?::src)?["\'][^>]+content=["\']([^"\']+)',
+        html, re.IGNORECASE,
+    )
+    if not m:
+        m = re.search(
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:og:image|twitter:image)',
+            html, re.IGNORECASE,
+        )
+    return m.group(1) if m else ""
+
+
 def fetch_headlines() -> list[dict]:
     """Fetch + aggregate recent headlines from all configured feeds.
 
@@ -93,6 +142,7 @@ def fetch_headlines() -> list[dict]:
                 "source": source,
                 "published": datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M"),
                 "link": getattr(entry, "link", ""),
+                "image": _entry_image(entry),
                 "_ts": ts,
             })
 
