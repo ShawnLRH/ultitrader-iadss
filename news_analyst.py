@@ -67,7 +67,7 @@ FACTOR_LABELS = {
 }
 
 _NEUTRAL_FACTORS = {k: 50 for k in FACTOR_KEYS}
-MIN_NEWSLETTER_WORDS = 850  # below this, trigger one expansion pass so the paper isn't thin
+MIN_NEWSLETTER_WORDS = 450  # below this, trigger one expansion pass so the paper isn't thin
 
 
 def _call_groq(cfg, messages, max_tokens=4000, json_mode=False, timeout=90, retries=3) -> str:
@@ -185,8 +185,10 @@ TODAY'S NUMBERED HEADLINES:
         expand_prompt = f"""The newspaper edition below is too short ({word_count} words). Rewrite it,
 keeping EXACTLY the same ===MARKER=== structure, the same KICKER:/HEADLINE:/IMAGE:/QUOTE:
 fields and the same facts, but expand every section's paragraphs with more depth:
-causes, context, named parties, numbers, and second-order effects. Target 1100-1500
-words total. Output the full rewritten edition in the same format, nothing else.
+causes, context, named parties, numbers, and second-order effects. Target 900-1200
+words total, and keep every individual paragraph under 90 words — split into more
+paragraphs rather than writing longer ones. Output the full rewritten edition in
+the same format, nothing else.
 
 CURRENT DRAFT:
 {text}
@@ -265,15 +267,22 @@ TODAY'S AGGREGATED HEADLINES:
 # Edition parsing — the ===MARKER=== plain-text format from generate_newsletter_text
 # ---------------------------------------------------------------------------
 
+def _strip_md(text: str) -> str:
+    """Remove markdown artifacts the LLM sometimes injects despite instructions
+    (**bold**, `code`, leading #s) — they'd render literally in the PDF."""
+    text = re.sub(r"[*_`]+", "", text)
+    return text.lstrip("# ").strip()
+
+
 def _parse_block(body: str) -> dict:
     """One LEAD/SECTION body → {kicker, headline, image_idx, quote, paras}."""
     out = {"kicker": "", "headline": "", "image_idx": None, "quote": "", "paras": []}
     plain_lines = []
     for line in body.split("\n"):
         stripped = line.strip()
-        m = re.match(r"^(KICKER|HEADLINE|IMAGE|QUOTE)\s*:\s*(.*)$", stripped, re.IGNORECASE)
+        m = re.match(r"^[*_`#\s]*(KICKER|HEADLINE|IMAGE|QUOTE)\s*:\s*(.*)$", stripped, re.IGNORECASE)
         if m:
-            key, val = m.group(1).upper(), m.group(2).strip().strip('"“”')
+            key, val = m.group(1).upper(), _strip_md(m.group(2)).strip('"“”')
             if key == "IMAGE":
                 num = re.search(r"\d+", val)
                 out["image_idx"] = int(num.group(0)) if num else None
@@ -286,7 +295,7 @@ def _parse_block(body: str) -> dict:
         else:
             plain_lines.append(line)
     rest = "\n".join(plain_lines).strip()
-    out["paras"] = [" ".join(p.split()) for p in re.split(r"\n\s*\n", rest) if p.strip()]
+    out["paras"] = [_strip_md(" ".join(p.split())) for p in re.split(r"\n\s*\n", rest) if p.strip()]
     return out
 
 
@@ -301,9 +310,9 @@ def _parse_edition(text: str) -> dict | None:
         marker = marker.strip().upper()
         body = body.strip()
         if marker == "MAIN_HEADLINE":
-            ed["main_headline"] = " ".join(body.split()).upper()
+            ed["main_headline"] = _strip_md(" ".join(body.split())).upper()
         elif marker == "DECK":
-            ed["deck"] = " ".join(body.split())
+            ed["deck"] = _strip_md(" ".join(body.split()))
         elif marker == "LEAD":
             ed["lead"] = _parse_block(body)
         elif marker.startswith("SECTION"):
@@ -666,17 +675,27 @@ def _masthead(story, fonts, date_str, vol_no):
     story.append(_hr(1.2))
 
 
-def _split_for_photo(paras: list[str], max_paras=2, max_chars=1500) -> tuple[list[str], list[str]]:
+def _split_for_photo(paras: list[str], max_paras=2, max_chars=950) -> tuple[list[str], list[str]]:
     """Cap how much text sits beside a photo — the two-column block is a Table
     row, which ReportLab cannot split across pages, so an over-long AI story
-    would otherwise crash layout. Overflow paragraphs flow full-width below."""
+    would otherwise crash layout or claim a whole page. Overflow flows
+    full-width below; an oversized first paragraph is cut at a sentence end."""
+    paras = list(paras)
+    if not paras:
+        return [], []
+    first = paras[0]
+    if len(first) > max_chars:
+        cut = first.rfind(". ", 200, max_chars)
+        if cut != -1:
+            return [first[:cut + 1]], [first[cut + 2:]] + paras[1:]
+        return [first], paras[1:]
     beside, total = [], 0
-    for p in paras:
-        if len(beside) >= max_paras or (beside and total + len(p) > max_chars):
-            break
+    for i, p in enumerate(paras):
+        if len(beside) >= max_paras or total + len(p) > max_chars:
+            return beside, paras[i:]
         beside.append(p)
         total += len(p)
-    return beside, paras[len(beside):]
+    return beside, []
 
 
 def _story_with_photo(paras_flow, photo, width, photo_right=True):
@@ -748,25 +767,26 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
     if ed:
         # --- front page: stamped headline, deck, lead story + photo ---
         for i, line in enumerate(_split_headline(ed["main_headline"])):
-            story.append(_PosterLine(line, fonts["head"], max_size=86 if i == 0 else 62))
+            story.append(_PosterLine(line, fonts["head"], max_size=76 if i == 0 else 54))
             story.append(Spacer(1, 4))
         story.append(Spacer(1, 4))
         _double_rule(story, heavy=2.4, light=0.8, heavy_first=True, gap=2.0)
         story.append(Spacer(1, 12))
 
+        # Kicker + deck run full width; only the first text chunk shares the
+        # unsplittable two-column table with the photo, so the front page can
+        # never be starved by an over-long lead.
         lead = ed["lead"] or {"kicker": "", "paras": [], "image_idx": None, "quote": ""}
-        lead_flow = []
         if lead.get("kicker"):
-            lead_flow.append(Paragraph(f"*&nbsp;&nbsp;{escape(lead['kicker'].upper())}", kicker_style))
+            story.append(Paragraph(escape(lead["kicker"].upper()), kicker_style))
         if ed.get("deck"):
-            lead_flow.append(Paragraph(escape(ed["deck"]), deck_style))
+            story.append(Paragraph(escape(ed["deck"]), deck_style))
         beside, below = _split_for_photo(lead.get("paras", []))
-        for p in beside:
-            lead_flow.append(Paragraph(escape(p), body_style))
+        lead_flow = [Paragraph(escape(p), body_style) for p in beside]
 
         photo = _image_for_story(headlines, lead.get("image_idx"), used_urls) or _any_image(headlines, used_urls)
         if photo:
-            img_flow = _photo_flowable(photo[0], width * 0.44 - 18, 3.1 * inch, photo[1], fonts)
+            img_flow = _photo_flowable(photo[0], width * 0.44 - 18, 2.4 * inch, photo[1], fonts)
             story.append(_story_with_photo(lead_flow, img_flow, width, photo_right=True))
         else:
             story.extend(lead_flow)
@@ -778,11 +798,7 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
 
         # --- sections flow on after the barometer, separated by double rules ---
         for idx, sec in enumerate(ed["sections"]):
-            block: list = [Spacer(1, 18)]
-            block.append(_hr(2.4))
-            block.append(Spacer(1, 2))
-            block.append(_hr(0.8))
-            block.append(Spacer(1, 8))
+            header: list = [Spacer(1, 18), _hr(2.4), Spacer(1, 2), _hr(0.8), Spacer(1, 8)]
 
             label = Paragraph(f"*&nbsp;&nbsp;{escape(sec['name'])}&nbsp;&nbsp;*", kicker_style)
             fkey = _section_factor_key(sec["name"])
@@ -795,28 +811,31 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
                     ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
                     ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ]))
-                block.append(head_row)
+                header.append(head_row)
             else:
-                block.append(label)
-            block.append(Spacer(1, 4))
+                header.append(label)
+            header.append(Spacer(1, 4))
             if sec.get("headline"):
-                block.append(Paragraph(escape(sec["headline"].upper()), section_head_style))
-            block.append(Spacer(1, 6))
+                header.append(Paragraph(escape(sec["headline"].upper()), section_head_style))
+            header.append(Spacer(1, 6))
 
             photo = _image_for_story(headlines, sec.get("image_idx"), used_urls)
             if photo:
                 beside, below = _split_for_photo(sec.get("paras", []))
                 img_flow = _photo_flowable(photo[0], width * 0.42 - 18, 2.6 * inch, photo[1], fonts)
-                block.append(_story_with_photo(
+                content = [_story_with_photo(
                     [Paragraph(escape(p), body_style) for p in beside],
-                    img_flow, width, photo_right=(idx % 2 == 0)))
-                rest = [Paragraph(escape(p), body_style) for p in below]
+                    img_flow, width, photo_right=(idx % 2 == 0))]
+                content += [Paragraph(escape(p), body_style) for p in below]
             else:
-                block.extend(Paragraph(escape(p), body_style) for p in sec.get("paras", []))
-                rest = []
+                content = [Paragraph(escape(p), body_style) for p in sec.get("paras", [])]
+
+            # Only the header + first content chunk stay glued — the rest
+            # flows freely so long sections don't force page breaks.
+            story.append(KeepTogether(header + content[:1]))
+            story.extend(content[1:])
 
             if sec.get("quote"):
-                block.append(Spacer(1, 6))
                 quote_tbl = Table(
                     [[[_hr(1.0), Spacer(1, 5),
                        Paragraph(f"&#8220;{escape(sec['quote'])}&#8221;", quote_style),
@@ -827,11 +846,9 @@ def build_pdf(newsletter_text: str, factors: dict, date_str: str, path: str, hea
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
                 ]))
-                block.append(quote_tbl)
-                block.append(Spacer(1, 8))
-
-            story.append(KeepTogether(block))
-            story.extend(rest)
+                story.append(Spacer(1, 6))
+                story.append(quote_tbl)
+                story.append(Spacer(1, 8))
     else:
         # --- fallback: unstructured text — still render on newsprint ---
         logger.warning("build_pdf: edition parse failed — using fallback rendering")
